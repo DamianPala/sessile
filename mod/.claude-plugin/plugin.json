@@ -1,0 +1,37 @@
+{
+  "name": "sessile",
+  "version": "0.1.0",
+  "author": { "name": "Damian Pala" },
+  "homepage": "https://github.com/DamianPala/sessile",
+  "repository": "https://github.com/DamianPala/sessile",
+  "license": "MIT",
+  "description": "Your Claude Code sessions in a pane docked beside the conversation: search, rename, archive, export and delete, here or in every project",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cliPath": {
+      "type": "string",
+      "title": "sessile binary",
+      "description": "Path to the sessile CLI (resolved through PATH when bare)",
+      "default": "sessile"
+    },
+    "layout": {
+      "type": "string",
+      "title": "Layout",
+      "description": "pane: takes the keyboard on open (docked at the side in fullscreen); band: full width above the prompt, ctrl+x tab to focus",
+      "options": ["pane", "band"],
+      "default": "pane"
+    },
+    "dockBackground": {
+      "type": "string",
+      "title": "Docked pane background",
+      "description": "Background of the pane when docked beside the transcript, e.g. your terminal's background as hex (#1a1b26 for TokyoNight); empty keeps Claude Code's own",
+      "default": ""
+    },
+    "exportDir": {
+      "type": "string",
+      "title": "Export directory",
+      "description": "Where m writes a session as markdown (~ allowed); empty writes into the directory of the session the pane runs in",
+      "default": ""
+    }
+  }
+}

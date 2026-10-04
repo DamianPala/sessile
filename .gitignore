@@ -1,0 +1,5 @@
+target/
+status.md
+__pycache__/
+docs/review-*.md
+docs/research-*.md

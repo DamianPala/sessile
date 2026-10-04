@@ -1,0 +1,14 @@
+{
+  "name": "sessile",
+  "description": "sessile: manage local Claude Code sessions from a pane inside Claude Code",
+  "owner": {
+    "name": "Damian Pala"
+  },
+  "plugins": [
+    {
+      "name": "sessile",
+      "source": "./mod",
+      "description": "Your Claude Code sessions in a pane docked beside the conversation: search, rename, archive, export and delete, here or in every project"
+    }
+  ]
+}

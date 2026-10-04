@@ -23,7 +23,7 @@ The pane needs the CLI, so install both.
 **1. The CLI** (needs a [Rust toolchain](https://rustup.rs)):
 
 ```bash
-cargo install --git https://github.com/DamianPala/sessile sessile
+cargo install --locked --git https://github.com/DamianPala/sessile sessile
 sessile --version
 ```
 

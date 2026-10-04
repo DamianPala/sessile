@@ -1,11 +1,13 @@
 name: Release
 
 # A tag `vX.Y.Z` builds the CLI for every platform and publishes a GitHub
-# release with the archives. A manual run builds the same archives as
-# workflow artifacts and publishes nothing.
+# release with the archives. A manual run, or a pull request that changes this
+# file, builds the same archives as workflow artifacts and publishes nothing.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
   workflow_dispatch:
 
 permissions:
@@ -78,4 +80,6 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: gh release create "$TAG" dist/* --repo "$REPO" --title "$TAG" --generate-notes

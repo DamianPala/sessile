@@ -60,6 +60,6 @@ Give the id, title, dates (`created_at` to `updated_at`) and the row's `resume_c
 
 ## Change sessions
 
-Stay read-only unless the user asks for the change. `rename`, `pin`, `unpin`, `archive`, `restore`, `delete` and `delete-empty` change the user's sessions; `sessile <command> --help` has each contract. The CLI refuses the current session and any session a Claude Code process is running; say so instead of working around it.
+Stay read-only unless the user asks for the change. `rename`, `pin`, `unpin`, `archive`, `restore`, `delete` and `delete-empty` change the user's sessions; `sessile <command> --help` has each contract. The CLI refuses the current session and any session a Claude Code process is running; say so instead of working around it. To delete the session you are in, the user opens `/sessile` and presses `d` on its `◆` row: the window moves to a fresh session first, then the old one is deleted. You cannot do it from inside the session.
 
 Cleaning up: list the candidates (`sessile list --project <dir> --include-headless --json`, or `--all`), show them with title, date, prompts and size, and ask which to remove. Prefer `archive`, which `restore` undoes; `delete` and `delete-empty` are permanent, so run their `--dry-run` first and show what it lists. Never remove or move files under the Claude config directory by hand: a session is more files than its transcript, and pins and the archive would be bypassed.

@@ -463,24 +463,53 @@ fn contract(name: &str) -> Contract {
                 ),
             )
         }
+        "delete-when-empty" => change(
+            "idempotent",
+            false,
+            id_changed(
+                &[("queued", json!({"type": "boolean", "const": true}))],
+                &["queued"],
+            ),
+            Some("changed is false when the session was queued already.".into()),
+        ),
+        "sweep" => {
+            let target = object(
+                &["id", "paths"],
+                props(&[("id", string("Session id")), ("paths", paths())]),
+            );
+            let reasons = json!({"type": "array", "items": skipped()});
+            change(
+                "idempotent",
+                false,
+                object(
+                    &["targets", "skipped", "dropped", "changed"],
+                    props(&[
+                        ("targets", json!({"type": "array", "items": target})),
+                        ("skipped", reasons.clone()),
+                        ("dropped", reasons),
+                        changed(),
+                    ]),
+                ),
+                Some(
+                    "targets are the queued sessions deleted, or with --dry-run to be deleted; \
+                      skipped stay queued (running, written to in the last 2 seconds, or not \
+                      removable now); dropped are taken off the queue and kept (gone, given a \
+                      conversation, pinned). changed is false with --dry-run."
+                        .into(),
+                ),
+            )
+        }
         "delete-empty" => {
             let mut target = row_props();
             target.insert("paths".into(), paths());
             let mut required = ROW_REQUIRED.to_vec();
             required.push("paths");
             let mut output = deletion(object(&required, target));
-            let skipped = object(
-                &["id", "reason"],
-                props(&[
-                    ("id", string("Session id")),
-                    ("reason", json!({"type": "string"})),
-                ]),
-            );
             output["required"]
                 .as_array_mut()
                 .expect("an object schema")
                 .push(json!("skipped"));
-            output["properties"]["skipped"] = json!({"type": "array", "items": skipped});
+            output["properties"]["skipped"] = json!({"type": "array", "items": skipped()});
             change(
                 "idempotent",
                 true,
@@ -497,6 +526,16 @@ fn contract(name: &str) -> Contract {
         }
         other => unreachable!("no contract for command {other}"),
     }
+}
+
+fn skipped() -> Value {
+    object(
+        &["id", "reason"],
+        props(&[
+            ("id", string("Session id")),
+            ("reason", json!({"type": "string"})),
+        ]),
+    )
 }
 
 fn deletion(target: Value) -> Value {

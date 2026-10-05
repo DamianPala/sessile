@@ -47,8 +47,15 @@ export type Cli = {
   failNext: 'exit' | 'json' | 'partial' | 'missing' | 'usage' | null
   // While set, every call waits for it.
   gate: Promise<void> | null
-  // The session Claude Code is in; /resume moves it.
+  // The session Claude Code is in; /resume and /clear move it.
   current: string
+  // Sessions another Claude Code runs too, besides this window.
+  heldElsewhere: Set<string>
+  // Ids queued by delete-when-empty, and how many sweeps ran.
+  queued: string[]
+  sweeps: number
+  // Whether /clear moves the window to a fresh session.
+  isClearStuck: boolean
   // The mod's view as last written: the test's window into its state.
   view: View
 }
@@ -124,6 +131,11 @@ function option(argv: string[], name: string): string | undefined {
 function answer(cli: Cli, argv: string[]): Out {
   const sub = subcommand(argv)
   const first = argv[firstArg(argv) + 1]
+  const current = argv[argv.indexOf('--current') + 1]
+  if (sub === 'sweep') {
+    cli.sweeps += 1
+    return { code: 0, out: { targets: [], skipped: [], dropped: [], changed: false } }
+  }
   const isArchived = argv.includes('--archived')
   // Lists cover --project unless --all; an id is looked up in --project only
   // when it is given, as the real binary does.
@@ -167,7 +179,17 @@ function answer(cli: Cli, argv: string[]): Out {
     cli.archive = swap(cli.archive)
     return { code: 0, out: { id: row.id, pinned: isPinned, changed: row.isPinned !== isPinned } }
   }
-  if (row.isLive || row.id === CURRENT) return refuse('session is live')
+  if (sub === 'delete-when-empty') {
+    if (row.prompts > 0) return fail(1, 'conflict', `session ${row.id} has a conversation`)
+    if (cli.heldElsewhere.has(row.id)) return refuse('another Claude Code process is running it')
+    const changed = !cli.queued.includes(row.id)
+    if (changed) cli.queued.push(row.id)
+    return { code: 0, out: { id: row.id, queued: true, changed } }
+  }
+  // --leaving plans the delete of the caller's own session: only another
+  // process holding it refuses.
+  const isLeaving = argv.includes('--leaving') && argv.includes('--dry-run') && row.id === current
+  if (isLeaving ? cli.heldElsewhere.has(row.id) : row.isLive || row.id === current) return refuse('session is live')
   if (sub === 'delete') {
     const targets = [{ id: row.id, paths: [`/x/${row.id}.jsonl`] }]
     if (argv.includes('--dry-run')) return { code: 0, out: { targets, changed: false, requires_confirmation: true } }
@@ -206,8 +228,27 @@ export function fakeCli(on: On, rowCount = 40, otherCount = 5): Cli {
     failNext: null,
     gate: null,
     current: CURRENT,
+    heldElsewhere: new Set(),
+    queued: [],
+    sweeps: 0,
+    isClearStuck: false,
     view: emptyView,
   }
+  // /clear as Claude Code runs it: the window moves to a fresh, empty
+  // session, live from then on, and the one it left is no longer live.
+  let cleared = 0
+  on('command.run', { command: 'clear' }, () => {
+    if (cli.isClearStuck) return { text: '' }
+    cleared += 1
+    const fresh = { ...makeRow(700 + cleared), title: '', titleSource: 'none' as const, prompts: 0, isLive: true }
+    const left = cli.current
+    cli.live = [fresh, ...cli.live.map(r => (r.id === left ? { ...r, isLive: false } : r))]
+    cli.current = fresh.id
+    return { text: '' }
+  })
+  // The pause before the delete passes at once; the sweep timer never ticks.
+  on('clock.sleep', () => ({ value: undefined }))
+  on('clock.every', () => ({ value: undefined }))
   // The mod keeps the rows in their own key; the test reads one merged view.
   on('state.set', (_, e, next) => {
     const { rows, searchHits } = cli.view

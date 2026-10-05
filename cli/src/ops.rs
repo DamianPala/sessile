@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::error::{Kind, Result, SessileError};
 use crate::export::cache_path;
 use crate::interrupt::{self, Changing};
-use crate::live::{guard, live_ids};
+use crate::live::{guard, guard_others, live_ids};
 use crate::paths::{ARCHIVE_DIR, Located, exists_in, footprint, locate, neither, validate_id};
 use crate::pins;
 use crate::scan::{Mapped, find_titles, has_conversation};
@@ -30,6 +30,16 @@ pub struct Ctx<'a> {
 pub struct Confirm {
     pub dry_run: bool,
     pub yes: bool,
+}
+
+/// Whose sessions a delete refuses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Lock {
+    /// The current session and every live one.
+    CurrentAndLive,
+    /// Only sessions another Claude Code runs: for a plan made before leaving
+    /// the current session (`delete --dry-run --leaving`).
+    Others,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -307,7 +317,7 @@ fn display_paths(paths: &[PathBuf]) -> Vec<String> {
 
 /// The footprint plus a full export sessile kept for this session; the
 /// transcript stays last, so a delete that stops half way can be repeated.
-fn delete_paths(config: &Path, located: &Located, id: &str) -> Result<Vec<PathBuf>> {
+pub(crate) fn delete_paths(config: &Path, located: &Located, id: &str) -> Result<Vec<PathBuf>> {
     let mut paths = footprint(&located.root, &located.slug, id)?;
     let cache = cache_path(config, id);
     if exists(&cache) {
@@ -318,7 +328,7 @@ fn delete_paths(config: &Path, located: &Located, id: &str) -> Result<Vec<PathBu
 
 /// Removes `paths` in order. A failure or Ctrl-C stops it; the error carries
 /// what was removed before, on top of `done`, in `context.completed`.
-fn remove_all(id: &str, paths: &[PathBuf], done: &[Target]) -> Result<()> {
+pub(crate) fn remove_all(id: &str, paths: &[PathBuf], done: &[Target]) -> Result<()> {
     for (i, path) in paths.iter().enumerate() {
         if let Err(e) = interrupt::check().and_then(|()| remove_path(path)) {
             let mut completed = done.to_vec();
@@ -344,9 +354,17 @@ fn confirmation_required(message: String) -> SessileError {
 }
 
 /// Removes exactly the paths `--dry-run` lists, and the session's pin.
-pub fn delete(ctx: &Ctx, id: &str, archived: bool, confirm: Confirm) -> Result<Deletion> {
+pub fn delete(
+    ctx: &Ctx,
+    (id, archived): (&str, bool),
+    confirm: Confirm,
+    lock: Lock,
+) -> Result<Deletion> {
     let located = locate(ctx.config, id, archived, ctx.project)?;
-    guard(ctx.config, id, ctx.current, "delete")?;
+    match lock {
+        Lock::CurrentAndLive => guard(ctx.config, id, ctx.current, "delete")?,
+        Lock::Others => guard_others(ctx.config, id, ctx.current, "delete")?,
+    }
     // An unreadable pins file refuses here, before anything is removed.
     pins::load(ctx.config)?;
     let paths = delete_paths(ctx.config, &located, id)?;

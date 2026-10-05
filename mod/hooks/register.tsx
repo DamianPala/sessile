@@ -445,12 +445,20 @@ async function rename($: EngineInterface, row: SessionRow, title: string, from: 
   if (ran) await focusRow($, row.id)
 }
 
+// The session this window is in is planned with --leaving: the CLI lists its
+// paths and refuses only when another Claude Code runs it too.
+async function planDelete($: EngineInterface, row: SessionRow, isLeaving: boolean): Promise<string[]> {
+  const { isArchiveView } = await readView($)
+  const args = ['delete', row.id, '--dry-run', ...archivedArgs(isArchiveView), ...(isLeaving ? ['--leaving'] : [])]
+  const plan = (await cli($, args)) as { targets: { paths: string[] }[] }
+  return plan.targets[0]?.paths ?? []
+}
+
 async function askDelete($: EngineInterface, row: SessionRow, detail: SessionDetail | null) {
   if (await isStale($, row, detail === null ? 'list' : 'detail')) return
   const ran = await act($, 'Checking', async () => {
-    const { isArchiveView } = await readView($)
-    const plan = (await cli($, ['delete', row.id, '--dry-run', ...archivedArgs(isArchiveView)])) as { targets: { paths: string[] }[] }
-    return { mode: { kind: 'confirm-delete', row, paths: plan.targets[0]?.paths ?? [], detail } }
+    const isLeaving = row.id === (await $.session.id())
+    return { mode: { kind: 'confirm-delete', row, paths: await planDelete($, row, isLeaving), detail, isLeaving } }
   })
   if (ran) await focusKey($, 'no')
 }
@@ -500,11 +508,66 @@ async function undoLast($: EngineInterface) {
   return runAndReload($, 'Undoing', undo.args, undo.text, undo.args[1] ?? null)
 }
 
-async function deleteRow($: EngineInterface, row: SessionRow) {
+async function deleteRow($: EngineInterface, row: SessionRow, isLeaving: boolean) {
   if (await isStale($, row, 'confirm-delete')) return
+  if (isLeaving) return leaveAndDelete($, row)
   // The dialog was the confirmation; --yes passes it on.
   const args = ['delete', row.id, '--yes', ...archivedArgs((await readView($)).isArchiveView)]
   return runAndReload($, 'Deleting', args, `Deleted “${row.title || row.id}”`, row.id)
+}
+
+// Claude Code writes the session it left a few last lines some tens of
+// milliseconds after it has moved on (seen up to ~90 ms); a delete before
+// them would leave a stub of the session behind.
+const SETTLE_MS = 2000
+
+// The window goes to a fresh session first, as /clear does, so the old one is
+// no longer this window's when it is deleted. The fresh one is queued to go
+// too if it is left as /clear left it; any session that gets a prompt stays.
+async function leaveAndDelete($: EngineInterface, row: SessionRow) {
+  const name = row.title || row.id.slice(0, 8)
+  const index = visibleRows(await readView($)).findIndex(r => r.id === row.id)
+  const ran = await act($, 'Leaving', async () => {
+    // Asked again at the press: another window may have resumed it since.
+    await planDelete($, row, true)
+    await $.command.run({ command: 'clear', args: '' })
+    const fresh = await $.session.id()
+    if (fresh === row.id) throw new Error('Claude Code stayed in this session')
+    await patch($, { currentId: fresh, notice: { kind: 'busy', text: `Deleting “${clean(name)}”…` } })
+    const queueError = await cli($, ['delete-when-empty', fresh]).then(
+      () => null,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    )
+    await $.clock.sleep(SETTLE_MS)
+    await cli($, ['delete', row.id, '--yes'])
+    const rows = await freshRows($)
+    if ([...(rows.rows ?? []), ...(rows.searchHits ?? [])].some(r => r.id === row.id)) {
+      throw new Error('Claude Code wrote to it again after the delete; press d on it once more')
+    }
+    const note = queueError === null ? '' : ` · the fresh session stays even if left empty: ${queueError}`
+    return { ...rows, mode: { kind: 'list' }, notice: done(`Deleted “${name}”${note}`) }
+  })
+  if (!ran) return
+  // The row that took its place, as after any delete.
+  const left = visibleRows(await readView($))
+  await focusRow($, left[Math.min(Math.max(index, 0), left.length - 1)]?.id ?? null)
+}
+
+const SWEEP_EVERY_MS = 60_000
+let isSweeping = false
+
+// The fresh sessions queued by leaveAndDelete go once nobody runs them and
+// they are still empty: one sweep when a Claude Code starts, for those left
+// by an exit, and one a minute, for those left while it kept running.
+// Quiet: a sweep that fails now is the next one's to do.
+async function sweep($: EngineInterface) {
+  if (isSweeping) return
+  isSweeping = true
+  try {
+    await cli($, ['sweep'], { isAll: true }).catch(() => undefined)
+  } finally {
+    isSweeping = false
+  }
 }
 
 async function deleteEmpty($: EngineInterface, count: number) {
@@ -614,7 +677,12 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'sessile', description })
     // Other mods register /sessions too; the alias may lose, /sessile stays.
     await $.command.register({ name: 'sessions', description: `${description} (alias of /sessile)` }).catch(() => undefined)
-    return next(e)
+    const started = await next(e)
+    if (e.isInteractive) {
+      void sweep($)
+      $.clock.every(SWEEP_EVERY_MS, () => sweep($))
+    }
+    return started
   })
 
   on('command.run', { command: 'sessile' }, openPane)
@@ -970,6 +1038,9 @@ function rowItems($: EngineInterface, els: Els, v: View, row: SessionRow, detail
     keyBtn(els, 'm', R.m[0], () => exportRow($, row), style),
     keyBtn(els, 'i', R.i[0], p => copyText($, row.id, 'session id', p.surface), style),
   ]
+  const remove = keyBtn(els, 'd', R.d[0], () => askDelete($, row, detail), { ...style, isDanger: true })
+  // This window's own session: deleting it leaves it first (the dialog says so).
+  if (row.id === v.currentId) return [remove, pin, ...safe]
   if (row.isLive) return [textItem(els, LIVE_NOTE, 'yellow'), pin, ...safe]
   return [
     ...(v.isArchiveView
@@ -979,7 +1050,7 @@ function rowItems($: EngineInterface, els: Els, v: View, row: SessionRow, detail
           keyBtn(els, 't', R.t[0], () => startRename($, row, detail), style),
         ]),
     keyBtn(els, 'a', R.a[v.isArchiveView ? 1 : 0], () => archiveOrRestore($, row, v.isArchiveView), style),
-    keyBtn(els, 'd', R.d[0], () => askDelete($, row, detail), { ...style, isDanger: true }),
+    remove,
     pin,
     ...safe,
   ]
@@ -1024,8 +1095,10 @@ function drawDetail($: EngineInterface, els: Els, v: View, d: SessionDetail, roo
     </Box>
   )
   const updated = new Date(d.updatedMs)
+  const isHere = d.id === v.currentId
+  const isLocked = d.isLive && !isHere
   // The yellow line below says it for a live one.
-  const actions = rowItems($, els, v, d, d, room.isFocused).slice(d.isLive ? 1 : 0)
+  const actions = rowItems($, els, v, d, d, room.isFocused).slice(isLocked ? 1 : 0)
   // Escape is the key for back; no letter, since `b` pages up in the list. The
   // button stays for the mouse, for the band (whose Escape the mod never
   // hears) and for a pane that could not take the keys back over a filled composer.
@@ -1049,7 +1122,8 @@ function drawDetail($: EngineInterface, els: Els, v: View, d: SessionDetail, roo
         {prompts('LAST', d.lastPrompts.slice(-keep))}
       </Box>
       <Text> </Text>
-      {d.isLive && <Text color="yellow">Live session: resume, rename, archive and delete are off.</Text>}
+      {isLocked && <Text color="yellow">Live session: resume, rename, archive and delete are off.</Text>}
+      {isHere && <Text dimColor wrap="truncate-end">This session: d deletes it and moves this window to a fresh one.</Text>}
       {buttonLines(els, room.columns, [...actions, back, close])}
       {noticeLine($, els, v.notice, room.isFocused)}
     </Box>
@@ -1075,25 +1149,26 @@ function drawConfirmDelete($: EngineInterface, els: Els, v: View, mode: Extract<
   const row = mode.row
   // The question, the session, the count and the buttons always fit: a low
   // pane lists fewer paths and drops the blank lines.
-  const fixed = 6 + (row.isPinned ? 1 : 0) + (v.notice !== null ? 1 : 0)
+  const fixed = 6 + (row.isPinned ? 1 : 0) + (mode.isLeaving ? 1 : 0) + (v.notice !== null ? 1 : 0)
   const spare = room.bodyRows - fixed
   const isRoomy = spare >= mode.paths.length + 2
   const shown = isRoomy ? mode.paths : mode.paths.slice(0, Math.max(0, spare))
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={1}>
-      <Text bold color="red">Delete permanently?</Text>
+      <Text bold color="red">{mode.isLeaving ? 'Delete this session and leave it?' : 'Delete permanently?'}</Text>
       <Text wrap="truncate-end">{row.title || row.id}   <Text dimColor>{row.prompts} prompts · {bytes(row.sizeBytes)}</Text></Text>
       {isRoomy && <Text> </Text>}
       {shown.map(p => <Text dimColor wrap="truncate-middle">{shortPath(p)}</Text>)}
       <Text dimColor wrap="truncate-end">{mode.paths.length} paths{shown.length > 0 && shown.length < mode.paths.length ? `, ${shown.length} listed` : ''} · cannot be undone</Text>
       {row.isPinned && <Text color="yellow" wrap="truncate-end">This session is pinned; deleting drops the pin too.</Text>}
+      {mode.isLeaving && <Text color="yellow" wrap="truncate-end">This window first moves to a fresh session, as /clear does.</Text>}
       {isRoomy && <Text> </Text>}
       <Box flexDirection="row" gap={3}>
         <Box flexDirection="row" gap={1}>
           <Text bold color="cyan">n</Text>
           <Button key="no" label="cancel" hotkey="n" autoFocus onPress={() => void backTo($, mode)} />
         </Box>
-        {keyBtn(els, 'y', 'delete', () => deleteRow($, row), { isDanger: true, isArmed: room.isFocused }).node}
+        {keyBtn(els, 'y', mode.isLeaving ? 'delete & leave' : 'delete', () => deleteRow($, row, mode.isLeaving), { isDanger: true, isArmed: room.isFocused }).node}
       </Box>
       {noticeLine($, els, v.notice, room.isFocused)}
     </Box>

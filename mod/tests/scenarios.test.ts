@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import { expect, test } from 'claude-code/testing'
 
 import { cellWidth, exportFileName, listPlan } from '../hooks/view'
-import { type Cli, fakeCli, OTHER, OTHER_FROM, ROOT, subcommand } from './fake-cli'
+import { type Cli, CURRENT, fakeCli, OTHER, OTHER_FROM, ROOT, subcommand } from './fake-cli'
 
 function mount($: Engine, columns: number, bodyRows: number, placement: 'inline' | 'dock' = 'inline') {
   return $.ui.mount({
@@ -465,4 +465,124 @@ test('deleting the last row moves the cursor up, deleting the only row goes to t
   await ui.press({ key: 'k:g' })
   expect(await ui.find({ type: 'Text', text: /No sessions in this project/ })).toBeDefined()
   await ui.unmount()
+})
+
+// ---- deleting the session this window is in
+
+const deletes = (cli: Cli) => cli.calls.filter(a => subcommand(a) === 'delete' && a.includes('--yes'))
+const currentOf = (argv: string[]) => argv[argv.indexOf('--current') + 1]
+// The ring onto row 0, the session this window is in, by the arrows.
+const onThisRow = ($: Engine) => $.ui.focus({ component: 'Pane', requestId: 'sessile', element: rowKey(0), origin: person })
+
+test('d on this session leaves it for a fresh one, then deletes it', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await onThisRow($)
+  // Its own row offers delete, but no resume, rename or archive.
+  for (const key of ['k:r', 'k:t', 'k:a']) expect(await ui.find({ key })).toBeUndefined()
+  await ui.press({ key: 'k:d' })
+  expect(cli.calls.at(-1)).toContain('--leaving')
+  expect(await ui.find({ type: 'Text', text: /Delete this session and leave it\?/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /first moves to a fresh session/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\/x\/00000000-.*\.jsonl/ })).toBeDefined()
+  expect(cli.view.focusKey).toBe('no')
+  await ui.press({ key: 'k:y' })
+  const fresh = cli.current
+  expect(fresh).not.toBe(CURRENT)
+  expect(cli.queued).toEqual([fresh])
+  // Deleted from the fresh session, so the old one is no longer current.
+  expect(deletes(cli).map(currentOf)).toEqual([fresh])
+  expect(cli.live.some(r => r.id === CURRENT)).toBe(false)
+  expect(cli.view.notice).toEqual({ kind: 'ok', text: 'Deleted “this one”' })
+  expect(cli.view.currentId).toBe(fresh)
+  expect(cli.view.mode.kind).toBe('list')
+  expect(await ui.find({ key: rowKey(0) })).toBeUndefined()
+  // The ring takes the row that took its place, never the filter.
+  expect(cli.view.focusKey).toBe(rowKey(1))
+  await ui.unmount()
+})
+
+test('d in the detail of this session, reached by clicks, deletes it the same way', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await $.ui.focus({ component: 'Pane', requestId: 'sessile', element: rowKey(3), origin: person })
+  // A first click selects, a second opens.
+  await ui.press({ key: rowKey(0) })
+  expect(cli.view.mode.kind).toBe('list')
+  await ui.press({ key: rowKey(0) })
+  expect(cli.view.mode.kind).toBe('detail')
+  expect(await ui.find({ type: 'Text', text: /This session: d deletes it/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Live session: .* are off/ })).toBeUndefined()
+  await ui.press({ key: 'k:d' })
+  await ui.press({ key: 'k:y' })
+  expect(cli.live.some(r => r.id === CURRENT)).toBe(false)
+  expect(cli.view.mode.kind).toBe('list')
+  expect(cli.view.notice?.text).toBe('Deleted “this one”')
+  await ui.unmount()
+})
+
+test('this session is not deleted while another window runs it, asked at d and again at y', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await onThisRow($)
+  cli.heldElsewhere.add(CURRENT)
+  await ui.press({ key: 'k:d' })
+  expect(cli.view.mode.kind).toBe('list')
+  expect(cli.view.notice?.text).toMatch(/^Checking failed: session is live/)
+
+  cli.heldElsewhere.clear()
+  await ui.press({ key: 'k:d' })
+  expect(cli.view.mode.kind).toBe('confirm-delete')
+  // Resumed in another window while the dialog was open.
+  cli.heldElsewhere.add(CURRENT)
+  await ui.press({ key: 'k:y' })
+  expect(cli.view.notice?.text).toMatch(/^Leaving failed: session is live/)
+  expect(cli.current).toBe(CURRENT)
+  expect(deletes(cli)).toEqual([])
+  expect(cli.live.some(r => r.id === CURRENT)).toBe(true)
+  await ui.unmount()
+})
+
+test('a /clear that does not move the window deletes nothing', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  cli.isClearStuck = true
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await onThisRow($)
+  await ui.press({ key: 'k:d' })
+  await ui.press({ key: 'k:y' })
+  expect(cli.view.notice?.text).toBe('Leaving failed: Claude Code stayed in this session')
+  expect(deletes(cli)).toEqual([])
+  expect(cli.queued).toEqual([])
+  expect(cli.live.some(r => r.id === CURRENT)).toBe(true)
+  await ui.unmount()
+})
+
+test('a doubled y on this session leaves and deletes once', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await onThisRow($)
+  await ui.press({ key: 'k:d' })
+  await Promise.all([ui.press({ key: 'k:y' }), ui.press({ key: 'k:y' })])
+  expect(deletes(cli).length).toBe(1)
+  expect(cli.queued.length).toBe(1)
+  await ui.unmount()
+})
+
+test('an interactive start sweeps the queue; a -p run does not', async ($, on) => {
+  const cli = fakeCli(on, 3)
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: ROOT, surface: null, isInteractive: false })
+  expect(cli.sweeps).toBe(0)
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  // The sweep is not awaited by the start.
+  for (let i = 0; i < 200 && cli.sweeps === 0; i++) await Promise.resolve()
+  expect(cli.sweeps).toBe(1)
+  const sweep = cli.calls.find(a => subcommand(a) === 'sweep') ?? []
+  expect(sweep.includes('--project')).toBe(false)
 })

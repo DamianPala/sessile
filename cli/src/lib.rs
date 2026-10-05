@@ -11,6 +11,7 @@ pub mod live;
 pub mod ops;
 pub mod output;
 pub mod paths;
+pub mod pending;
 pub mod pins;
 pub mod scan;
 pub mod search;

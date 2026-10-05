@@ -1,6 +1,6 @@
 //! Live-session detection and the guard shared by every destructive command.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::thread;
@@ -22,8 +22,9 @@ struct SessionFile {
 /// What `sessions/` tells about running Claude Code processes.
 #[derive(Default)]
 pub struct Live {
-    /// Ids, in lower case, of the sessions a running process holds.
-    pub ids: HashSet<String>,
+    /// Ids, in lower case, of the sessions a running process holds, each with
+    /// how many processes hold it.
+    pub holders: HashMap<String, usize>,
     /// Running processes whose `sessions/<pid>.json` does not name a session:
     /// each holds a session nobody can tell.
     pub unknown: Vec<u32>,
@@ -72,7 +73,7 @@ pub fn live_sessions(config: &Path) -> Live {
         match (named, owner) {
             (Some((pid, id, start)), _) => {
                 if pid_alive(pid, start.as_deref()) {
-                    live.ids.insert(id.to_ascii_lowercase());
+                    *live.holders.entry(id.to_ascii_lowercase()).or_default() += 1;
                 }
             }
             (None, Some(pid)) => live.unknown.push(pid),
@@ -84,7 +85,7 @@ pub fn live_sessions(config: &Path) -> Live {
 
 /// Session ids that have a running process.
 pub fn live_ids(config: &Path) -> HashSet<String> {
-    live_sessions(config).ids
+    live_sessions(config).holders.into_keys().collect()
 }
 
 #[cfg(target_os = "linux")]
@@ -137,29 +138,42 @@ fn pid_alive(pid: u32, _proc_start: Option<&str>) -> bool {
     }
 }
 
+fn refused(id: &str, message: String, hint: &str) -> Result<()> {
+    Err(SessileError::new(Kind::SessionLive, message)
+        .with_hint(hint)
+        .with_context("id", serde_json::json!(id)))
+}
+
 /// Refuses a change to the current or a live session. Called right before the
 /// change, with a fresh read of the live sessions.
 pub fn guard(config: &Path, id: &str, current: Option<&str>, action: &str) -> Result<()> {
-    let refused = |message: String, hint: &str| {
-        Err(SessileError::new(Kind::SessionLive, message)
-            .with_hint(hint)
-            .with_context("id", serde_json::json!(id)))
-    };
     if current == Some(id) {
         return refused(
+            id,
             format!("cannot {action} the current session {id}"),
             "Run the command from another session",
         );
     }
+    guard_others(config, id, None, action)
+}
+
+/// Refuses a change to a session another Claude Code process runs. The
+/// current one passes while it is the only process holding it: the caller is
+/// about to leave it, and its own `sessions/<pid>.json` names it until then.
+pub fn guard_others(config: &Path, id: &str, current: Option<&str>, action: &str) -> Result<()> {
     let live = live_sessions(config);
-    if live.ids.contains(id) {
+    let own = usize::from(current == Some(id));
+    if live.holders.get(id).copied().unwrap_or(0) > own {
+        let whom = if own == 1 { "another" } else { "a" };
         return refused(
-            format!("cannot {action} live session {id}: a Claude Code process is running it"),
+            id,
+            format!("cannot {action} live session {id}: {whom} Claude Code process is running it"),
             "Exit that Claude Code session first",
         );
     }
     if let Some(pid) = live.unknown.first() {
         return refused(
+            id,
             format!(
                 "cannot {action} session {id}: process {pid} is running a session that \
                  sessions/{pid}.json does not name, and it may be this one"

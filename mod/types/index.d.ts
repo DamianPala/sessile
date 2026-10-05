@@ -70,7 +70,9 @@ export type Mode =
   | { kind: 'list' }
   | { kind: 'detail'; detail: SessionDetail }
   | { kind: 'rename'; row: SessionRow; detail: SessionDetail | null }
-  | { kind: 'confirm-delete'; row: SessionRow; paths: string[]; detail: SessionDetail | null }
+  // `isLeaving`: the row is the session this window is in, which it leaves
+  // for a fresh one before the delete.
+  | { kind: 'confirm-delete'; row: SessionRow; paths: string[]; detail: SessionDetail | null; isLeaving: boolean }
   | { kind: 'confirm-empty'; sessions: EmptySession[] }
 
 // The CLI call that reverses the action the notice reports, offered as `u`.

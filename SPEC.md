@@ -31,8 +31,10 @@ Reading head and tail of 500+ files and full-text search need native code.
 | `archive <id>` / `restore <id>` | moves the footprint; a session already there is left alone |
 | `export <id> [--archived] [--turns RANGE \| --last-turns N] [--output-file PATH]` | Markdown transcript: prompts (`## You · turn N`), replies, tool counts; all turns or the ones asked for; to stdout, or to `PATH` |
 | `excerpts <id> <query> [--archived] [--limit N] [--plain]` | turn number, role and snippet of every prompt and reply holding all the words, in conversation order; turn N = Nth counted prompt plus its replies, as in `export` |
-| `delete <id> [--archived] [--dry-run] [--yes]` | removes the footprint; needs `--yes`, dry-run lists the paths |
+| `delete <id> [--archived] [--dry-run [--leaving]] [--yes]` | removes the footprint; needs `--yes`, dry-run lists the paths; `--leaving` plans the current session's delete, refused only when another Claude Code runs it |
 | `delete-empty [--dry-run] [--yes]` | bulk delete of empty sessions (no prompt, no reply, no attachment); guarded, pinned and unreadable ones go to `skipped` |
+| `delete-when-empty <id>` | queues an empty session (the current one too, even before its file exists) in `sessile/pending-empty.json` |
+| `sweep [--dry-run]` | deletes queued sessions nobody runs, untouched for 2 s and still empty; drops the gone, pinned and talked-in ones from the queue |
 | `pin <id>` / `unpin <id>` | keeps a session at the top of `list` and out of `delete-empty` |
 | `schema [COMMAND]` | machine-readable description of every command |
 
@@ -55,7 +57,7 @@ A `Client` surface module gets keys only after a mouse click (`$.ui.focus` canno
 - A toggle that leaves no row keeps the ring on its own button, and an archive that leaves no row puts it on `u`, so the next letter acts instead of typing into the filter.
 - Changing the scope (`v`, `w`, `g`) runs an open full-text search again in the new scope.
 - All-projects view adds a PROJECT column (last segment of the session's cwd).
-- Detail and row actions: `r` resume, `t` rename, `a` archive/restore, `d` delete, `p` pin/unpin, `m` export Markdown, `i` copy id; detail also `Esc` back (a clickable `esc back` button, no letter: `b` pages up in the list), `q` close.
+- Detail and row actions: `r` resume, `t` rename, `a` archive/restore, `d` delete (on this window's own row: delete and leave), `p` pin/unpin, `m` export Markdown, `i` copy id; detail also `Esc` back (a clickable `esc back` button, no letter: `b` pages up in the list), `q` close.
 - After archive or restore the notice offers `u` undo (the reverse command), until the next action.
 - Confirm dialogs: `y` yes, `n` cancel. `Esc` steps back one level: a filled filter clears first (wherever the ring is), the plain list closes the pane. The keys stay in the pane: Escape hands them to the prompt before the mod hears of it, so the pane asks for them back (granted over an empty composer).
 - The ✕ mark and `ctrl+x x` reach the mod as the same close as Escape, so with a filter or a detail open they step back too.
@@ -141,6 +143,15 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 - Permanent `rm` of the footprint.
 - Confirmation dialog shows the title and the exact list of paths to remove (`--dry-run`); yes runs `delete --yes`.
 
+### Delete the session you are in
+
+- `d` on the `◆` row (or in its detail) plans with `delete --dry-run --leaving`: refused when another Claude Code runs the session too. The dialog ("Delete this session and leave it?") lists the paths and says the window first moves to a fresh session.
+- `y` asks the CLI again, runs `/clear` through `$.command.run`, checks that `$.session.id()` changed, queues the fresh session (`delete-when-empty`), waits 2 s and runs `delete --yes` from the fresh session. "Deleted …" is drawn only when the re-read list no longer has the row.
+- Why the wait: Claude Code writes the left session's last lines (`cost-state`, `last-prompt`) 40–90 ms after the switch is visible; a delete before them leaves a stub that shows in `/resume`.
+- Why the queue: `/clear` writes its own entries into the fresh session, so left untouched it stays in `/resume` as a 3 KB `/clear` row. `sweep` removes it once nobody runs it, if it is still empty: the mod runs `sweep` when an interactive Claude Code starts (for a session left by an exit) and every 60 s (for one left by `/clear` or `/resume`). `list` and `search` hide a queued session nobody runs that has no prompt, so the pane never offers it in between.
+- Exit instead of `/clear` was rejected: the process cannot delete after its own last write, and nothing would show whether the delete worked.
+- A crash between `/clear` and the delete leaves the old session in place, listed as usual.
+
 ### Delete empty (bulk)
 
 - Selects sessions with 0 prompts that also hold no assistant message and no attachment (a session started by a slash command, a screenshot or `!` input counts 0 prompts and is kept once anything followed), shows the list and the count, deletes after one confirmation.
@@ -157,7 +168,7 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 
 ### Guards
 
-- The current session and any live session: no delete, archive or rename (rename appends to a file another process writes).
+- Any live session: no delete, archive or rename (rename appends to a file another process writes). The current session: no archive or rename, and delete only by leaving it first (above).
 - Every destructive action re-checks the guard right before running, not only when the list was drawn.
 - Every action ends with a toast stating what happened, or the error with the path.
 
@@ -172,4 +183,4 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 - Mod: `claude plugin test` against a stateful fake of the CLI.
 - Live: `python3 tests/live/live_test.py` runs the real pane in Claude Code in tmux, over generated sessions in their own `CLAUDE_CONFIG_DIR`; it covers what the kit cannot (focus ring, Escape, dock and inline layout, speed, real file moves).
 - Human: `docs/manual-tests.md`, tasks for a person learning the tool from the pane alone.
-- Covered: title resolution order, prompt counting, junk filters; footprint collection (id-keyed paths only, never `memory/`); guards on current and live sessions; archive/restore round-trip and restore collision; delete removes exactly the listed paths; all-projects list and search; export content.
+- Covered: title resolution order, prompt counting, junk filters; footprint collection (id-keyed paths only, never `memory/`); guards on current and live sessions; archive/restore round-trip and restore collision; delete removes exactly the listed paths; all-projects list and search; export content; deleting the current session (leave, queue, settle, delete, focus after; refusal when another window runs it; a `/clear` that does not move the window), the queue and sweep (quiet period, drop on a conversation or a pin, a current session queued before its file exists), sweep at an interactive start only.

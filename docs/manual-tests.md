@@ -21,6 +21,7 @@ Rules:
 9. **Find a session from another project.**
 10. **Delete the empty sessions** of this project.
 11. **Delete one chosen session** (the throwaway). Did the dialog tell you enough to be sure it was the right one?
+12. **Delete the session you are in** (start a throwaway one first: `claude`, type one prompt, `/sessile`). Did you expect to land in a fresh session? Leave that one without typing and, a minute later, check `/resume`: is it gone?
 
 ## Only a person can judge
 

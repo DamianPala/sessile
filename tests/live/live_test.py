@@ -103,6 +103,25 @@ class Fixture:
     def export_dir(self) -> Path:
         return self.root / "export"
 
+    @property
+    def calls(self) -> Path:
+        return self.root / "calls.log"
+
+    def call_lines(self) -> list[str]:
+        return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+    def current_id(self) -> str | None:
+        """The --current of the pane's last call: the session Claude Code is in."""
+        for line in reversed(self.call_lines()):
+            words = line.split()
+            if "--current" in words:
+                return words[words.index("--current") + 1]
+        return None
+
+    def queued(self) -> list[str]:
+        path = self.config / "sessile" / "pending-empty.json"
+        return json.loads(path.read_text())["ids"] if path.exists() else []
+
     def by_title(self, title: str) -> Session:
         return next(s for s in self.sessions if s.title == title)
 
@@ -327,7 +346,11 @@ class Run:
 
 def start(args: argparse.Namespace, name: str, fx: Fixture, width: int = 150, height: int = 45, layout: str = "pane") -> Run:
     wrapper = fx.root / "sessile-wrapper.sh"
-    wrapper.write_text(f'#!/bin/sh\nCLAUDE_CONFIG_DIR="{fx.config}" exec "{args.cli}" "$@"\n')
+    # Every call is logged: its --current is the session Claude Code is in.
+    wrapper.write_text(
+        f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{fx.calls}"\n'
+        f'CLAUDE_CONFIG_DIR="{fx.config}" exec "{args.cli}" "$@"\n'
+    )
     wrapper.chmod(0o755)
     settings = fx.root / "settings.json"
     options = {"cliPath": str(wrapper), "exportDir": str(fx.export_dir), "layout": layout}
@@ -637,9 +660,10 @@ def s_resume(run: Run) -> None:
     s.keys("r")
     s.wait(r"Resumed “resume target”", timeout=30)
     s.wait(r"Reply with the single word: kilo", where="all")
-    # The resumed session is now this one, so its row is read-only. The ring
-    # moves to the row only after the notice is drawn.
-    s.wait(r"live session: read-only", timeout=5)
+    # The resumed session is now this one: no resume, only delete-and-leave.
+    # The ring moves to the row only after the notice is drawn.
+    s.wait(r"d \[ delete \]  p \[", timeout=5)
+    s.expect_not(r"r \[ resume", "this window's own session is not resumed again")
     s.keys("Down")
     s.expect_prompt_empty("after a resume the keys stay in the pane")
 
@@ -674,6 +698,47 @@ def s_guards(run: Run) -> None:
         raise Failure(f"the refusal is not an error object of kind session_live: {out.stderr!r}")
 
 
+def s_leave(run: Run) -> None:
+    """d on this window's own session: /clear in the real Claude Code, then the
+    delete of its fixture copy, and the fresh session queued."""
+    s, fx = run.screen, run.fx
+    # The sweep at start is the first call, and it carries this window's id.
+    deadline = time.time() + 10
+    while not any(" sweep" in line for line in fx.call_lines()):
+        if time.time() > deadline:
+            raise Failure(f"no sweep when Claude Code started; calls: {fx.call_lines()}")
+        time.sleep(0.2)
+    here = fx.current_id()
+    if here is None:
+        raise Failure(f"the sweep at start carried no --current: {fx.call_lines()}")
+    mine = Session("leave me now", id=here)
+    fx.sessions.append(mine)
+    fx.transcript(mine).write_text("\n".join(session_lines(mine)) + "\n")
+    env = fx.config / "session-env" / here
+    env.mkdir(parents=True)
+    (env / "env").write_text("x")
+
+    run.open()
+    run.to_row(mine.title)
+    s.expect(r"d \[ delete \]", "this window's own session offers delete")
+    s.expect_not(r"t \[ rename|r \[ resume|a \[ archive", "but no rename, resume or archive")
+    s.keys("d")
+    s.wait(r"Delete this session and leave it\?")
+    s.expect(r"first moves to a fresh session", "the dialog says the window moves")
+    s.expect(r"2 paths · cannot be undone", "the dialog counts what goes")
+    s.keys("y")
+    s.wait(r"Deleted “leave me now”", timeout=20)
+    if fx.transcript(mine).exists() or env.exists():
+        raise Failure("the fixture copy of the left session is still there")
+    fresh = fx.current_id()
+    if fresh in (None, here):
+        raise Failure(f"Claude Code did not move to a fresh session: {fx.call_lines()[-3:]}")
+    if fx.queued() != [fresh]:
+        raise Failure(f"the fresh session {fresh} is not the one queued: {fx.queued()}")
+    s.keys("Down")
+    s.expect_prompt_empty("after leaving, the keys stay in the pane")
+
+
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "open_and_keys": s_open_and_keys,
     "toggle_on_empty_view": s_toggle_on_empty_view,
@@ -686,6 +751,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "mouse": s_mouse,
     "resume": s_resume,
     "guards": s_guards,
+    "leave": s_leave,
 }
 # Fixture size and layout per scenario, where not the default.
 BULK = {"moving_speed": 3000}

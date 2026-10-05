@@ -14,7 +14,7 @@ Accepted by every subcommand, before or after it:
 
 - `--json`: the result as one JSON document on stdout. It is also the default when stdout is not a terminal; at a terminal the default is a human-readable table.
 - `--project <dir>`: the cwd the sessions were started in (Claude Code's `projects/<slug>` dir, slug = path with every non-alphanumeric character replaced by `-`). Defaults to the current directory. `list`, `search` and `delete-empty` use it as the project. Commands that take an id (`get`, `rename`, `archive`, `restore`, `delete`, `export`, `excerpts`) look the id up only in that project when `--project` is given (not found otherwise), and in every project when it is absent.
-- `--current <id>`: the session you are running in; defaults to `CLAUDE_CODE_SESSION_ID`, which Claude Code sets for the commands it runs, so an agent never has to know its own id. It is refused by every change (`rename`, `archive`, `restore`, `delete`, `delete-empty`) and reported with `is_live: true` and `is_current: true` in `list`, `get` and `search`, so a UI can lock it. Live sessions (a running pid in `sessions/<pid>.json`) are refused the same way. When that file of a running process names no session (it was caught half-written, or it is broken), every change is refused until it reads again: the process holds a session nobody can tell.
+- `--current <id>`: the session you are running in; defaults to `CLAUDE_CODE_SESSION_ID`, which Claude Code sets for the commands it runs, so an agent never has to know its own id. It is refused by every change (`rename`, `archive`, `restore`, `delete`, `delete-empty`, `sweep`) except `pin`, `unpin`, `delete-when-empty` and `delete --dry-run --leaving`, and reported with `is_live: true` and `is_current: true` in `list`, `get` and `search`, so a UI can lock it. Live sessions (a running pid in `sessions/<pid>.json`) are refused the same way. When that file of a running process names no session (it was caught half-written, or it is broken), every change is refused until it reads again: the process holds a session nobody can tell.
 
 `--version` prints the bare version. `--help` on any command names its defaults; `sessile schema` describes the same in JSON.
 
@@ -30,8 +30,10 @@ Accepted by every subcommand, before or after it:
 | `sessile rename <id> <title...>` | appends a `custom-title` entry | idempotent |
 | `sessile pin <id>` / `sessile unpin <id>` | keeps a session at the top of `list` and out of `delete-empty` | idempotent |
 | `sessile archive <id>` / `sessile restore <id>` | moves the footprint to / from `session-archive/<slug>/` | idempotent |
-| `sessile delete <id> [--archived] [--dry-run] [--yes]` | removes the footprint for good | not idempotent, needs `--yes` |
+| `sessile delete <id> [--archived] [--dry-run [--leaving]] [--yes]` | removes the footprint for good | not idempotent, needs `--yes` |
 | `sessile delete-empty [--dry-run] [--yes]` | deletes this project's empty sessions: no prompt, no reply, no attachment | idempotent, needs `--yes` |
+| `sessile delete-when-empty <id>` | queues an empty session to be deleted once nobody runs it | idempotent |
+| `sessile sweep [--dry-run]` | deletes the queued sessions that nobody runs and that are still empty | idempotent |
 | `sessile schema [COMMAND]` | the machine-readable description of the CLI | read-only |
 
 ## Output
@@ -80,7 +82,7 @@ Ctrl-C during a read stops at once. During a change it stops between two files: 
 
 ```json
 {"schema_version":"1","tool_version":"0.1.0",
- "commands":["archive","delete","delete-empty","excerpts","export","get","list","pin","rename","restore","search","unpin"],
+ "commands":["archive","delete","delete-empty","delete-when-empty","excerpts","export","get","list","pin","rename","restore","search","sweep","unpin"],
  "global_flags":[…],"format_defaults":{"tty":"text","non_tty":"json"},
  "exit_codes":{"0":"success","1":"failure","2":"usage error","130":"interrupted by Ctrl-C"}}
 ```
@@ -163,6 +165,8 @@ Archive keeps each path relative to the config dir under `session-archive/<slug>
 
 `--dry-run` lists the same paths with `changed: false` and `requires_confirmation: true`. Without `--dry-run` it needs `--yes`, checked after every other check (an unknown or live id fails with its own kind first). A repeat fails with `not_found`.
 
+`--dry-run --leaving` plans the delete of the `--current` session, for a caller about to leave it: it lists the paths and refuses only when another Claude Code runs the session too (more than one `sessions/<pid>.json` names it). The delete itself still refuses the session until the caller has left it, so the pane runs `/clear` in between.
+
 ### `delete-empty`
 
 ```json
@@ -175,6 +179,23 @@ Archive keeps each path relative to the config dir under `session-archive/<slug>
 A session is empty when it has 0 prompts, no assistant message and no attachment in a user message. A session started by a slash command, a screenshot or `!` input counts 0 prompts but is not empty once anything followed, and is left alone without being reported. A transcript line that does not parse counts as content.
 
 `targets` are `list` rows plus `paths`. Current, live, pinned and unreadable sessions with 0 prompts land in `skipped` instead of failing the run; `reason` is `pinned`, `unreadable: …` or the refusal's message. `--dry-run` adds `requires_confirmation` (true when `targets` is not empty). `--yes` is needed only when there is something to delete.
+
+### `delete-when-empty`, `sweep`
+
+The fresh session `/clear` opens is empty until someone types in it; left like that, it stays in `/resume`. `delete-when-empty <id>` queues an empty session in `<config>/sessile/pending-empty.json` (`{"ids":[…]}`, under the lock `pending-empty.lock`) and prints `{"id":…,"queued":true,"changed":…}`. The current session may be queued, also before Claude Code has written its transcript; a session another Claude Code runs is refused (`session_live`), and so is one with a conversation (`conflict`).
+
+`sweep` goes through the queue under its lock, in every project:
+
+```json
+{"targets":[{"id":"…","paths":["…"]}],
+ "skipped":[{"id":"…","reason":"cannot delete the current session …"}],
+ "dropped":[{"id":"…","reason":"has a conversation"}],
+ "changed":true}
+```
+
+A queued session is deleted (`targets`) when no Claude Code runs it, its transcript was not written to in the last 2 seconds (Claude Code writes a left session's last lines a moment after it moves on) and it is still empty. It stays queued (`skipped`) while it runs or was just written to. It is taken off the queue and kept (`dropped`) when it is gone, got a conversation, or was pinned. `--dry-run` reports the same and changes nothing. No `--yes`: only sessions queued while empty go, and only while they still are.
+
+`list` and `search` leave out a queued session that nobody runs and that has no prompt.
 
 ### Turns
 

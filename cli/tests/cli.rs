@@ -679,6 +679,236 @@ fn delete_empty_skips_current_and_live() {
     assert_eq!(env.list().len(), 2);
 }
 
+// ---- leaving the current session -------------------------------------------
+
+/// What `/clear` leaves in the fresh session, as Claude Code 2.1.289 writes
+/// it: the command's own entries and the bookkeeping written on exit.
+fn clear_stub(id: &str) -> Vec<String> {
+    vec![
+        format!(r#"{{"type":"mode","mode":"normal","sessionId":"{id}"}}"#),
+        r#"{"type":"file-history-snapshot","isSnapshotUpdate":false}"#.into(),
+        format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"<local-command-caveat>The command below was run directly in Claude Code.</local-command-caveat>"}},"isMeta":true,"cwd":"/work/proj","sessionId":"{id}"}}"#
+        ),
+        format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>"}},"cwd":"/work/proj","sessionId":"{id}"}}"#
+        ),
+        format!(
+            r#"{{"type":"system","subtype":"local_command","content":"<local-command-stdout></local-command-stdout>","isMeta":false,"cwd":"/work/proj","sessionId":"{id}"}}"#
+        ),
+        format!(r#"{{"type":"cost-state","sessionId":"{id}","totalCostUSD":0}}"#),
+        format!(r#"{{"type":"last-prompt","sessionId":"{id}"}}"#),
+    ]
+}
+
+impl Env {
+    fn transcript(&self, id: &str) -> PathBuf {
+        self.path(&format!("projects/{SLUG}/{id}.jsonl"))
+    }
+
+    /// Ages a transcript past the sweep's quiet time.
+    fn age(&self, id: &str) {
+        let file = fs::File::options()
+            .write(true)
+            .open(self.transcript(id))
+            .unwrap();
+        let then = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+        file.set_modified(then).unwrap();
+    }
+
+    fn queued(&self) -> Vec<String> {
+        match fs::read_to_string(self.path("sessile/pending-empty.json")) {
+            Ok(text) => serde_json::from_str::<Value>(&text).unwrap()["ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+}
+
+fn reasons(report: &Value, key: &str) -> Vec<(String, String)> {
+    report[key]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["id"].as_str().unwrap().to_string(),
+                s["reason"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn leaving_plans_the_delete_of_the_current_session_and_nothing_more() {
+    let env = Env::new();
+    env.session(A, &[user("work"), assistant("done", "m")]);
+    env.full_footprint(A);
+    env.live(A, std::process::id(), None);
+    let before = env.snapshot();
+    // Its own sessions/<pid>.json names it: one holder, the caller.
+    let plan = env.ok(&["delete", A, "--dry-run", "--leaving", "--current", A]);
+    assert_eq!(plan["changed"], false);
+    assert_eq!(plan["targets"][0]["id"], A);
+    // The footprint (its sidecar dir once) and the transcript.
+    assert_eq!(plan["targets"][0]["paths"].as_array().unwrap().len(), 9);
+    assert_eq!(env.snapshot(), before);
+    // Without --dry-run there is nothing to lean on: the session is still current.
+    env.fails(&["delete", A, "--yes", "--leaving", "--current", A], 2);
+    assert_eq!(
+        env.kind(&["delete", A, "--yes", "--current", A]),
+        "session_live"
+    );
+    // Run by a process that is not the caller's, it stays locked.
+    assert_eq!(
+        env.kind(&["delete", A, "--dry-run", "--leaving"]),
+        "session_live"
+    );
+    assert_eq!(env.snapshot(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn leaving_is_refused_when_another_claude_code_runs_the_session_too() {
+    let env = Env::new();
+    env.session(A, &[user("work")]);
+    env.live(A, std::process::id(), None);
+    env.write(
+        "sessions/other.json",
+        &json!({"pid": std::os::unix::process::parent_id(), "sessionId": A}).to_string(),
+    );
+    let err = env.fails(&["delete", A, "--dry-run", "--leaving", "--current", A], 1);
+    assert_eq!(err["kind"], "session_live");
+    assert!(err["message"].as_str().unwrap().contains("another"));
+}
+
+#[test]
+fn an_empty_session_queued_while_current_goes_once_left_and_quiet() {
+    let env = Env::new();
+    env.session(A, &clear_stub(A));
+    env.full_footprint(A);
+    env.session(B, &[user("keep me")]);
+    let queued = env.conforms("delete-when-empty", &[A, "--current", A]);
+    assert_eq!(queued, json!({"id": A, "queued": true, "changed": true}));
+    assert_eq!(
+        env.ok(&["delete-when-empty", A, "--current", A])["changed"],
+        false
+    );
+    assert_eq!(env.queued(), vec![A]);
+
+    // While someone is in it, it is listed; once left, it is not.
+    let current = env.items(&["list", "--project", PROJECT, "--current", A]);
+    assert!(ids_of(&current).contains(&A.to_string()));
+    assert_eq!(ids_of(&env.list()), vec![B]);
+    assert!(
+        env.items(&["search", "clear", "--project", PROJECT])
+            .is_empty()
+    );
+
+    let still = env.conforms("sweep", &["--current", A]);
+    assert!(reasons(&still, "skipped")[0].1.contains("current"));
+    let fresh = env.ok(&["sweep"]);
+    assert!(reasons(&fresh, "skipped")[0].1.contains("written to"));
+    assert!(env.transcript(A).exists());
+
+    env.age(A);
+    let before = env.snapshot();
+    let plan = env.conforms("sweep", &["--dry-run"]);
+    assert_eq!(plan["targets"][0]["id"], A);
+    assert_eq!(plan["changed"], false);
+    assert_eq!(env.snapshot(), before);
+
+    let done = env.conforms("sweep", &[]);
+    assert_eq!(done["changed"], true);
+    let removed = done["targets"][0]["paths"].as_array().unwrap();
+    assert_eq!(removed.len(), 9);
+    assert!(
+        removed
+            .iter()
+            .all(|p| !Path::new(p.as_str().unwrap()).exists())
+    );
+    assert!(env.queued().is_empty());
+    assert!(env.transcript(B).exists());
+    assert_eq!(env.ok(&["sweep"])["changed"], false);
+}
+
+#[test]
+fn a_queued_session_that_got_a_conversation_or_a_pin_is_kept() {
+    let env = Env::new();
+    for id in [A, B, C] {
+        env.session(id, &clear_stub(id));
+        env.ok(&["delete-when-empty", id, "--current", id]);
+    }
+    let mut typed = clear_stub(A);
+    typed.push(user("on second thought"));
+    env.session(A, &typed);
+    env.ok(&["pin", B]);
+    fs::remove_file(env.transcript(C)).unwrap();
+    env.age(A);
+    env.age(B);
+    let done = env.ok(&["sweep"]);
+    assert!(done["targets"].as_array().unwrap().is_empty());
+    let mut dropped = reasons(&done, "dropped");
+    dropped.sort();
+    assert_eq!(
+        dropped,
+        vec![
+            (A.to_string(), "has a conversation".to_string()),
+            (B.to_string(), "pinned".to_string()),
+            (C.to_string(), "gone".to_string()),
+        ]
+    );
+    assert!(env.queued().is_empty());
+    assert!(env.transcript(A).exists() && env.transcript(B).exists());
+    assert_eq!(env.row(A)["prompts"], 1);
+}
+
+#[test]
+fn the_current_session_is_queued_before_claude_code_has_written_it() {
+    let env = Env::new();
+    assert_eq!(env.kind(&["delete-when-empty", A]), "not_found");
+    assert_eq!(
+        env.ok(&["delete-when-empty", A, "--current", A])["queued"],
+        true
+    );
+    // Still in use: kept queued, even with no file yet.
+    let held = env.ok(&["sweep", "--current", A]);
+    assert!(reasons(&held, "skipped")[0].1.contains("current"));
+    assert_eq!(env.queued(), vec![A]);
+    // Left without a line written: nothing to delete, off the queue.
+    let left = env.ok(&["sweep"]);
+    assert_eq!(
+        reasons(&left, "dropped"),
+        vec![(A.to_string(), "gone".to_string())]
+    );
+    assert!(env.queued().is_empty());
+}
+
+#[test]
+fn a_running_session_or_one_with_a_conversation_is_not_queued_or_swept() {
+    let env = Env::new();
+    env.session(A, &[user("work")]);
+    assert_eq!(
+        env.kind(&["delete-when-empty", A, "--current", A]),
+        "conflict"
+    );
+    env.session(B, &clear_stub(B));
+    env.live(B, std::process::id(), None);
+    // Another process runs it: not the caller's to queue.
+    assert_eq!(env.kind(&["delete-when-empty", B]), "session_live");
+    env.ok(&["delete-when-empty", B, "--current", B]);
+    env.age(B);
+    // Left by the caller but still run by that other process.
+    let swept = env.ok(&["sweep"]);
+    assert!(reasons(&swept, "skipped")[0].1.contains("live"));
+    assert!(env.transcript(B).exists());
+    assert_eq!(env.queued(), vec![B]);
+}
+
 // ---- pins ------------------------------------------------------------------
 
 fn ids_of(rows: &[Value]) -> Vec<String> {
@@ -1913,6 +2143,7 @@ fn every_json_result_matches_its_declared_schema() {
     env.conforms("restore", &[B]);
     env.conforms("restore", &[B]);
     env.conforms("delete", &[B, "--dry-run"]);
+    env.conforms("delete", &[A, "--dry-run", "--leaving", "--current", A]);
     env.conforms("delete", &[B, "--yes"]);
     env.conforms("delete-empty", &["--project", PROJECT, "--dry-run"]);
     env.conforms("delete-empty", &["--project", PROJECT, "--yes"]);
@@ -1955,6 +2186,7 @@ fn schema_index_lists_every_command_with_its_contract() {
             "archive",
             "delete",
             "delete-empty",
+            "delete-when-empty",
             "excerpts",
             "export",
             "get",
@@ -1963,6 +2195,7 @@ fn schema_index_lists_every_command_with_its_contract() {
             "rename",
             "restore",
             "search",
+            "sweep",
             "unpin"
         ]
     );

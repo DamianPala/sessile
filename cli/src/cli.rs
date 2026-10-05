@@ -16,11 +16,12 @@ use crate::export::{document, markdown};
 use crate::interrupt;
 use crate::introspect;
 use crate::live::live_ids;
-use crate::ops::{self, Confirm};
+use crate::ops::{self, Confirm, Lock};
 use crate::output::{
     Format, escape_controls, plain_field, resolve, structured_errors, write_json, write_stdout,
 };
 use crate::paths::{config_dir, expand_home, locate, project_slug, project_slugs};
+use crate::pending;
 use crate::pins;
 use crate::scan::{Mapped, turns};
 use crate::search::{ALL_FIELDS, MatchField, Query, search};
@@ -67,7 +68,7 @@ pub struct Cli {
     /// Directory the sessions were started in; default: the current directory. Selects the project of list, search and delete-empty; for commands that take an id it limits the lookup to that project (without it every project is searched)
     #[arg(long, global = true, value_name = "DIR")]
     project: Option<String>,
-    /// Id of the session this process runs in: rename, archive, restore, delete and delete-empty refuse it (pin and unpin do not), and list, get and search report it live and current. Default: CLAUDE_CODE_SESSION_ID, which Claude Code sets for the commands it runs
+    /// Id of the session this process runs in: rename, archive, restore, delete, delete-empty and sweep refuse it (pin, unpin, delete-when-empty and delete --dry-run --leaving do not), and list, get and search report it live and current. Default: CLAUDE_CODE_SESSION_ID, which Claude Code sets for the commands it runs
     #[arg(long, global = true, value_name = "ID", value_parser = lower)]
     current: Option<String>,
     #[command(subcommand)]
@@ -300,6 +301,35 @@ pub enum Command {
         /// Confirm the deletion; ignored with --dry-run
         #[arg(long)]
         yes: bool,
+        /// With --dry-run: plan the delete of the current session the caller is about to leave; only another Claude Code running it refuses. The delete itself still waits until the session is no longer current
+        #[arg(long, requires = "dry_run")]
+        leaving: bool,
+    },
+    /// Queue an empty session to be deleted once nobody runs it
+    #[command(
+        long_about = "Queue an empty session (no prompt, no reply, no attachment) to be deleted \
+        by sweep once no Claude Code runs it, if it is still empty then. The current session may \
+        be queued; one another Claude Code runs is refused, and so is one with a conversation. \
+        list and search leave out queued sessions nobody runs that have no prompt. Queuing an \
+        already queued session changes nothing (changed: false)."
+    )]
+    DeleteWhenEmpty {
+        /// Session id (a UUID, as list prints it)
+        #[arg(value_parser = lower)]
+        id: String,
+    },
+    /// Delete the queued sessions that nobody runs and that are still empty
+    #[command(
+        long_about = "Delete every session queued by delete-when-empty that no Claude Code \
+        runs, that was not written to in the last 2 seconds and that is still empty. Queued \
+        sessions that are gone, got a conversation or were pinned are taken off the queue and \
+        kept (dropped); running or just-written ones stay queued (skipped). Searches every \
+        project. --dry-run reports the same and changes nothing."
+    )]
+    Sweep {
+        /// Report what would be deleted and dropped; change nothing
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Delete every session of the project with no prompt and no reply; needs --yes
     #[command(
@@ -512,9 +542,30 @@ fn run(cli: Cli) -> Result<()> {
             archived,
             dry_run,
             yes,
+            leaving,
         } => {
-            let deletion = ops::delete(&ctx, &id, archived, Confirm { dry_run, yes })?;
+            let lock = if leaving {
+                Lock::Others
+            } else {
+                Lock::CurrentAndLive
+            };
+            let deletion = ops::delete(&ctx, (&id, archived), Confirm { dry_run, yes }, lock)?;
             emit_deleted(fmt, &deletion);
+            Ok(())
+        }
+        Command::DeleteWhenEmpty { id } => {
+            let changed = pending::enqueue(&ctx, &id)?;
+            if fmt == Format::Json {
+                write_json(&json!({"id": id, "queued": true, "changed": changed}));
+            } else {
+                let note = if changed { "" } else { " (already)" };
+                write_stdout(&format!("{id} queued for deletion while empty{note}\n"));
+            }
+            Ok(())
+        }
+        Command::Sweep { dry_run } => {
+            let report = pending::sweep(&config, ctx.current, dry_run)?;
+            emit_sweep(fmt, &report, dry_run);
             Ok(())
         }
         Command::DeleteEmpty { dry_run, yes } => {
@@ -567,6 +618,18 @@ fn pins_for_read(config: &Path) -> (BTreeSet<String>, Option<SessileError>) {
         Ok(pinned) => (pinned, None),
         Err(e) => (BTreeSet::new(), Some(e)),
     }
+}
+
+/// A queue that cannot be read hides nothing: a listing never loses a row
+/// to a broken file of sessile's own.
+fn queued_ids(config: &Path) -> BTreeSet<String> {
+    pending::load(config).unwrap_or_default()
+}
+
+/// A queued session nobody runs and nobody typed in is about to go: listing
+/// it would offer a session the next sweep deletes.
+fn is_left_in_queue(queued: &BTreeSet<String>, row: &Row) -> bool {
+    queued.contains(&row.id) && !row.is_live && row.prompts == 0
 }
 
 fn lower(id: &str) -> std::result::Result<String, std::convert::Infallible> {
@@ -630,7 +693,8 @@ fn cmd_list(ctx: &ops::Ctx, slugs: &[String], listing: &Listing, fmt: Format) ->
     let (pinned, pins_error) = pins_for_read(ctx.config);
     pins::mark(&mut rows, &pinned);
     mark_current(&mut rows, ctx.current);
-    rows.retain(|r| listing.shows(r));
+    let queued = queued_ids(ctx.config);
+    rows.retain(|r| listing.shows(r) && !is_left_in_queue(&queued, r));
     // Before the limit, so pins survive it.
     pins::pinned_first(&mut rows);
     let has_more = rows.len() > listing.limit;
@@ -656,7 +720,8 @@ fn cmd_search(
     let (pinned, pins_error) = pins_for_read(ctx.config);
     pins::mark(hits.iter_mut().map(|h| &mut h.row), &pinned);
     mark_current(hits.iter_mut().map(|h| &mut h.row), ctx.current);
-    hits.retain(|h| listing.shows(&h.row));
+    let queued = queued_ids(ctx.config);
+    hits.retain(|h| listing.shows(&h.row) && !is_left_in_queue(&queued, &h.row));
     // A word some title has as written is not a typo: "sessile" must not
     // bring "session" along. Exact prompt or reply hits do not count, so a
     // misspelling quoted in a conversation still finds the title.
@@ -879,6 +944,31 @@ fn emit_deleted(fmt: Format, deletion: &ops::Deletion) {
     if deletion.requires_confirmation == Some(true) {
         out.push("(needs --yes)".into());
     }
+    write_stdout(&(out.join("\n") + "\n"));
+}
+
+fn emit_sweep(fmt: Format, report: &pending::Sweep, dry_run: bool) {
+    if fmt == Format::Json {
+        write_json(report);
+        return;
+    }
+    let verb = if dry_run { "would delete" } else { "deleted" };
+    let mut out = vec![format!("{verb} {} queued sessions", report.targets.len())];
+    for t in &report.targets {
+        out.push(format!("  {}", t.id));
+        out.extend(
+            t.paths
+                .iter()
+                .map(|p| format!("    {}", escape_controls(p))),
+        );
+    }
+    let lines = |label: &str, list: &[ops::Skipped]| -> Vec<String> {
+        list.iter()
+            .map(|s| format!("  {label} {}: {}", s.id, escape_controls(&s.reason)))
+            .collect()
+    };
+    out.extend(lines("still queued", &report.skipped));
+    out.extend(lines("dropped", &report.dropped));
     write_stdout(&(out.join("\n") + "\n"));
 }
 

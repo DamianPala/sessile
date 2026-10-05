@@ -4,6 +4,7 @@
 pub mod cli;
 pub mod error;
 pub mod export;
+pub mod idfile;
 pub mod interrupt;
 pub mod introspect;
 pub mod live;

@@ -498,6 +498,9 @@ test('d on this session leaves it for a fresh one, then deletes it', async ($, o
   expect(cli.view.currentId).toBe(fresh)
   expect(cli.view.mode.kind).toBe('list')
   expect(await ui.find({ key: rowKey(0) })).toBeUndefined()
+  // The blank session the window moved to is not listed: the delete must not
+  // look as if it made one.
+  expect(await ui.find({ key: `row:${fresh}` })).toBeUndefined()
   // The ring takes the row that took its place, never the filter.
   expect(cli.view.focusKey).toBe(rowKey(1))
   await ui.unmount()

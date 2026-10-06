@@ -138,8 +138,10 @@ function answer(cli: Cli, argv: string[]): Out {
   }
   const isArchived = argv.includes('--archived')
   // Lists cover --project unless --all; an id is looked up in --project only
-  // when it is given, as the real binary does.
-  const listed = (rows: SessionRow[]) => (argv.includes('--all') ? rows : rows.filter(r => r.cwd === ROOT))
+  // when it is given, as the real binary does. Queued sessions with no prompt
+  // are left out unless another window runs them.
+  const isHidden = (r: SessionRow) => cli.queued.includes(r.id) && r.prompts === 0 && (r.id === current || !r.isLive)
+  const listed = (rows: SessionRow[]) => rows.filter(r => (argv.includes('--all') || r.cwd === ROOT) && !isHidden(r))
   const reachable = (rows: SessionRow[]) => (argv.includes('--project') ? rows.filter(r => r.cwd === ROOT) : rows)
   const store = isArchived ? cli.archive : cli.live
   const find = (id: string | undefined) => reachable(store).find(r => r.id === id)

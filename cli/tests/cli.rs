@@ -800,9 +800,10 @@ fn an_empty_session_queued_while_current_goes_once_left_and_quiet() {
     );
     assert_eq!(env.queued(), vec![A]);
 
-    // While someone is in it, it is listed; once left, it is not.
+    // Not listed, also to the window sitting in it: the delete that queued
+    // it must not look as if it made a session.
     let current = env.items(&["list", "--project", PROJECT, "--current", A]);
-    assert!(ids_of(&current).contains(&A.to_string()));
+    assert_eq!(ids_of(&current), vec![B]);
     assert_eq!(ids_of(&env.list()), vec![B]);
     assert!(
         env.items(&["search", "clear", "--project", PROJECT])
@@ -846,6 +847,9 @@ fn a_queued_session_that_got_a_conversation_or_a_pin_is_kept() {
     let mut typed = clear_stub(A);
     typed.push(user("on second thought"));
     env.session(A, &typed);
+    // Typed in: listed again, before any sweep, to the window in it too.
+    let current = env.items(&["list", "--project", PROJECT, "--current", A]);
+    assert!(ids_of(&current).contains(&A.to_string()));
     env.ok(&["pin", B]);
     fs::remove_file(env.transcript(C)).unwrap();
     env.age(A);
@@ -907,6 +911,8 @@ fn a_running_session_or_one_with_a_conversation_is_not_queued_or_swept() {
     assert!(reasons(&swept, "skipped")[0].1.contains("live"));
     assert!(env.transcript(B).exists());
     assert_eq!(env.queued(), vec![B]);
+    // Listed, locked, while that other window runs it.
+    assert_eq!(env.row(B)["is_live"], true);
 }
 
 // ---- pins ------------------------------------------------------------------

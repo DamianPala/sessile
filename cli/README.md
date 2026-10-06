@@ -195,7 +195,7 @@ The fresh session `/clear` opens is empty until someone types in it; left like t
 
 A queued session is deleted (`targets`) when no Claude Code runs it, its transcript was not written to in the last 2 seconds (Claude Code writes a left session's last lines a moment after it moves on) and it is still empty. It stays queued (`skipped`) while it runs or was just written to. It is taken off the queue and kept (`dropped`) when it is gone, got a conversation, or was pinned. `--dry-run` reports the same and changes nothing. No `--yes`: only sessions queued while empty go, and only while they still are.
 
-`list` and `search` leave out a queued session that nobody runs and that has no prompt.
+`list` and `search` leave out a queued session with no prompt unless another Claude Code runs it; the current session is left out too, so a window that just left a deleted session does not see its blank successor listed.
 
 ### Turns
 

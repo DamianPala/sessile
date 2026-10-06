@@ -310,7 +310,8 @@ pub enum Command {
         long_about = "Queue an empty session (no prompt, no reply, no attachment) to be deleted \
         by sweep once no Claude Code runs it, if it is still empty then. The current session may \
         be queued; one another Claude Code runs is refused, and so is one with a conversation. \
-        list and search leave out queued sessions nobody runs that have no prompt. Queuing an \
+        list and search leave out a queued session with no prompt unless another Claude Code \
+        runs it; the current one is left out too. Queuing an \
         already queued session changes nothing (changed: false)."
     )]
     DeleteWhenEmpty {
@@ -626,10 +627,12 @@ fn queued_ids(config: &Path) -> BTreeSet<String> {
     pending::load(config).unwrap_or_default()
 }
 
-/// A queued session nobody runs and nobody typed in is about to go: listing
-/// it would offer a session the next sweep deletes.
-fn is_left_in_queue(queued: &BTreeSet<String>, row: &Row) -> bool {
-    queued.contains(&row.id) && !row.is_live && row.prompts == 0
+/// A queued session nobody typed in is either about to go (nobody runs it)
+/// or the blank one a delete of the current session just moved this window
+/// to: listing it reads as if the delete made a session. Another window
+/// running it keeps it listed, locked.
+fn is_hidden_in_queue(queued: &BTreeSet<String>, row: &Row) -> bool {
+    queued.contains(&row.id) && row.prompts == 0 && (row.is_current || !row.is_live)
 }
 
 fn lower(id: &str) -> std::result::Result<String, std::convert::Infallible> {
@@ -694,7 +697,7 @@ fn cmd_list(ctx: &ops::Ctx, slugs: &[String], listing: &Listing, fmt: Format) ->
     pins::mark(&mut rows, &pinned);
     mark_current(&mut rows, ctx.current);
     let queued = queued_ids(ctx.config);
-    rows.retain(|r| listing.shows(r) && !is_left_in_queue(&queued, r));
+    rows.retain(|r| listing.shows(r) && !is_hidden_in_queue(&queued, r));
     // Before the limit, so pins survive it.
     pins::pinned_first(&mut rows);
     let has_more = rows.len() > listing.limit;
@@ -721,7 +724,7 @@ fn cmd_search(
     pins::mark(hits.iter_mut().map(|h| &mut h.row), &pinned);
     mark_current(hits.iter_mut().map(|h| &mut h.row), ctx.current);
     let queued = queued_ids(ctx.config);
-    hits.retain(|h| listing.shows(&h.row) && !is_left_in_queue(&queued, &h.row));
+    hits.retain(|h| listing.shows(&h.row) && !is_hidden_in_queue(&queued, &h.row));
     // A word some title has as written is not a typo: "sessile" must not
     // bring "session" along. Exact prompt or reply hits do not count, so a
     // misspelling quoted in a conversation still finds the title.

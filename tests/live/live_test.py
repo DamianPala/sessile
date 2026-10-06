@@ -735,6 +735,19 @@ def s_leave(run: Run) -> None:
         raise Failure(f"Claude Code did not move to a fresh session: {fx.call_lines()[-3:]}")
     if fx.queued() != [fresh]:
         raise Failure(f"the fresh session {fresh} is not the one queued: {fx.queued()}")
+    # Claude Code writes the /clear stub under the real config; the pane reads
+    # the fixture, so it sees the stub only through a copy (read, never moved).
+    stub = Path.home() / ".claude" / "projects" / slug(str(CWD)) / f"{fresh}.jsonl"
+    deadline = time.time() + 10
+    while not stub.exists():
+        if time.time() > deadline:
+            raise Failure(f"no /clear stub at {stub}")
+        time.sleep(0.2)
+    fx.transcript(Session("", id=fresh)).write_bytes(stub.read_bytes())
+    s.keys("g")
+    time.sleep(1.5)
+    # The legend reads "◆ this"; a row would carry the glyph before a title.
+    s.expect_not(r"◆(?! this)", "the blank session the window moved to is not listed")
     s.keys("Down")
     s.expect_prompt_empty("after leaving, the keys stay in the pane")
 

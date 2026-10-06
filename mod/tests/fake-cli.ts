@@ -56,6 +56,8 @@ export type Cli = {
   sweeps: number
   // Whether /clear moves the window to a fresh session.
   isClearStuck: boolean
+  // Runs when the mod sleeps, before the sleep passes at once.
+  onSleep: (() => void) | null
   // The mod's view as last written: the test's window into its state.
   view: View
 }
@@ -234,6 +236,7 @@ export function fakeCli(on: On, rowCount = 40, otherCount = 5): Cli {
     queued: [],
     sweeps: 0,
     isClearStuck: false,
+    onSleep: null,
     view: emptyView,
   }
   // /clear as Claude Code runs it: the window moves to a fresh, empty
@@ -249,7 +252,10 @@ export function fakeCli(on: On, rowCount = 40, otherCount = 5): Cli {
     return { text: '' }
   })
   // The pause before the delete passes at once; the sweep timer never ticks.
-  on('clock.sleep', () => ({ value: undefined }))
+  on('clock.sleep', () => {
+    cli.onSleep?.()
+    return { value: undefined }
+  })
   on('clock.every', () => ({ value: undefined }))
   // The mod keeps the rows in their own key; the test reads one merged view.
   on('state.set', (_, e, next) => {

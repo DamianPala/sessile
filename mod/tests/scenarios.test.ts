@@ -487,7 +487,14 @@ test('d on this session leaves it for a fresh one, then deletes it', async ($, o
   expect(await ui.find({ type: 'Text', text: /first moves to a fresh session/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\/x\/00000000-.*\.jsonl/ })).toBeDefined()
   expect(cli.view.focusKey).toBe('no')
+  // While the delete waits for Claude Code's last writes, the row is already
+  // gone and the ring is on the row that took its place.
+  let atSettle: { isListed: boolean; mode: string; focusKey: string | null } | null = null
+  cli.onSleep = () => {
+    atSettle = { isListed: cli.view.rows.some(r => r.id === CURRENT), mode: cli.view.mode.kind, focusKey: cli.view.focusKey }
+  }
   await ui.press({ key: 'k:y' })
+  expect(atSettle).toEqual({ isListed: false, mode: 'list', focusKey: rowKey(1) })
   const fresh = cli.current
   expect(fresh).not.toBe(CURRENT)
   expect(cli.queued).toEqual([fresh])
@@ -561,6 +568,23 @@ test('a /clear that does not move the window deletes nothing', async ($, on) => 
   expect(deletes(cli)).toEqual([])
   expect(cli.queued).toEqual([])
   expect(cli.live.some(r => r.id === CURRENT)).toBe(true)
+  await ui.unmount()
+})
+
+test('a delete that fails after leaving lists the session again', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await onThisRow($)
+  await ui.press({ key: 'k:d' })
+  cli.onSleep = () => {
+    cli.failNext = 'exit'
+  }
+  await ui.press({ key: 'k:y' })
+  expect(cli.view.notice?.text).toBe('Leaving failed: injected failure')
+  expect(cli.current).not.toBe(CURRENT)
+  expect(cli.view.rows.some(r => r.id === CURRENT)).toBe(true)
+  expect(await ui.find({ key: rowKey(0) })).toBeDefined()
   await ui.unmount()
 })
 

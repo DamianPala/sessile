@@ -527,30 +527,49 @@ const SETTLE_MS = 2000
 async function leaveAndDelete($: EngineInterface, row: SessionRow) {
   const name = row.title || row.id.slice(0, 8)
   const index = visibleRows(await readView($)).findIndex(r => r.id === row.id)
-  const ran = await act($, 'Leaving', async () => {
+  await act($, 'Leaving', async () => {
     // Asked again at the press: another window may have resumed it since.
     await planDelete($, row, true)
     await $.command.run({ command: 'clear', args: '' })
     const fresh = await $.session.id()
     if (fresh === row.id) throw new Error('Claude Code stayed in this session')
-    await patch($, { currentId: fresh, notice: { kind: 'busy', text: `Deleting “${clean(name)}”…` } })
+    // Gone from the list now, not after the settle: the wait is Claude Code's,
+    // not the person's. A failure below lists it again.
+    const drop = (rows: SessionRow[]) => rows.filter(r => r.id !== row.id)
+    await patch($, v => ({
+      currentId: fresh,
+      rows: drop(v.rows),
+      searchHits: v.searchHits === null ? null : drop(v.searchHits),
+      mode: { kind: 'list' },
+      notice: { kind: 'busy', text: `Deleting “${clean(name)}”…` },
+    }))
+    // The row that took its place, as after any delete.
+    const left = visibleRows(await readView($))
+    await focusRow($, left[Math.min(Math.max(index, 0), left.length - 1)]?.id ?? null)
     const queueError = await cli($, ['delete-when-empty', fresh]).then(
       () => null,
       (error: unknown) => (error instanceof Error ? error.message : String(error)),
     )
-    await $.clock.sleep(SETTLE_MS)
-    await cli($, ['delete', row.id, '--yes'])
-    const rows = await freshRows($)
-    if ([...(rows.rows ?? []), ...(rows.searchHits ?? [])].some(r => r.id === row.id)) {
-      throw new Error('Claude Code wrote to it again after the delete; press d on it once more')
-    }
+    const rows = await deleteAfterSettle($, row.id)
     const note = queueError === null ? '' : ` · the fresh session stays even if left empty: ${queueError}`
-    return { ...rows, mode: { kind: 'list' }, notice: done(`Deleted “${name}”${note}`) }
+    return { ...rows, notice: done(`Deleted “${name}”${note}`) }
   })
-  if (!ran) return
-  // The row that took its place, as after any delete.
-  const left = visibleRows(await readView($))
-  await focusRow($, left[Math.min(Math.max(index, 0), left.length - 1)]?.id ?? null)
+}
+
+async function deleteAfterSettle($: EngineInterface, id: string): Promise<Partial<View>> {
+  try {
+    await $.clock.sleep(SETTLE_MS)
+    await cli($, ['delete', id, '--yes'])
+  } catch (error) {
+    await freshRows($).then(rows => patch($, rows), () => undefined)
+    throw error
+  }
+  const rows = await freshRows($)
+  if ([...(rows.rows ?? []), ...(rows.searchHits ?? [])].some(r => r.id === id)) {
+    await patch($, rows)
+    throw new Error('Claude Code wrote to it again after the delete; press d on it once more')
+  }
+  return rows
 }
 
 const SWEEP_EVERY_MS = 60_000

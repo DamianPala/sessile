@@ -727,6 +727,9 @@ def s_leave(run: Run) -> None:
     s.expect(r"first moves to a fresh session", "the dialog says the window moves")
     s.expect(r"2 paths · cannot be undone", "the dialog counts what goes")
     s.keys("y")
+    s.wait(r"Deleting “leave me now”…", timeout=10)
+    # The notice names it in quotes; the row would not.
+    s.expect_not(r"leave me now(?!”)", "the row goes at once, not after the settle")
     s.wait(r"Deleted “leave me now”", timeout=20)
     if fx.transcript(mine).exists() or env.exists():
         raise Failure("the fixture copy of the left session is still there")

@@ -651,14 +651,27 @@ async function openPane($: EngineInterface) {
   const isList = (await readView($)).mode.kind === 'list'
   // Every opening starts at the live sessions of this project.
   const home: Scope = { isArchiveView: false, isAllProjects: false }
+  const load = async () => {
+    await queueIfBlank($)
+    if (isList) await reload($, () => home)
+  }
   if (layout === 'band') {
     await patch($, { isBandOpen: true })
-    if (isList) void reload($, () => home)
+    void load()
     return { text: 'sessile opened above the prompt: ctrl+x tab gives it the keys.' }
   }
   await openPaneSite($)
-  if (isList) void reload($, () => home)
+  void load()
   return { text: 'sessile pane opened.' }
+}
+
+// A session started only to open the pane holds nothing but this command and
+// would stay in /resume as a blank row. Queued before the list is read, so it
+// is not drawn; the sweep removes it once left, unless a prompt came first.
+// The CLI refuses a session with a conversation, the usual case, so a refusal
+// says nothing worth showing.
+async function queueIfBlank($: EngineInterface) {
+  await cli($, ['delete-when-empty', await $.session.id()], { isAll: false }).catch(() => undefined)
 }
 
 // Oversized on purpose: the engine caps both at what the layout spares.

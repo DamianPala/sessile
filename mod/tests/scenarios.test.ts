@@ -600,6 +600,48 @@ test('a doubled y on this session leaves and deletes once', async ($, on) => {
   await ui.unmount()
 })
 
+// The kit cannot place a pane; /sessile only needs it to say it opened.
+function stubPaneOpen(on: On) {
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+}
+
+// /sessile as typed, then the list it loads in the background, read to the end.
+async function typeSessile($: Engine, cli: Cli) {
+  const lists = () => cli.calls.filter(a => subcommand(a) === 'list').length
+  const before = lists()
+  await $.command.run({ command: 'sessile', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  for (let i = 0; i < 2000 && (lists() === before || cli.view.notice?.kind === 'busy'); i++) await Promise.resolve()
+}
+
+test('a session that only opened the pane is queued before the list is read', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  stubPaneOpen(on)
+  const ui = await mount($, 120, 24)
+  // Row 0, this window's session, has no prompt.
+  await typeSessile($, cli)
+  expect(cli.queued).toEqual([CURRENT])
+  const order = cli.calls.map(subcommand)
+  expect(order.indexOf('delete-when-empty')).toBeLessThan(order.indexOf('list'))
+  expect(cli.calls.find(a => subcommand(a) === 'delete-when-empty')).toContain('--project')
+  await ui.unmount()
+})
+
+test('a session with a conversation, or not written yet, is handled at /sessile', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  stubPaneOpen(on)
+  const ui = await mount($, 120, 24)
+  cli.live = cli.live.map(r => (r.id === CURRENT ? { ...r, prompts: 3 } : r))
+  await typeSessile($, cli)
+  // Refused by the CLI, and nothing is said about it.
+  expect(cli.queued).toEqual([])
+  expect(cli.view.notice?.kind).not.toBe('error')
+  cli.live = cli.live.filter(r => r.id !== CURRENT)
+  await typeSessile($, cli)
+  expect(cli.queued).toEqual([CURRENT])
+  await ui.unmount()
+})
+
 test('an interactive start sweeps the queue; a -p run does not', async ($, on) => {
   const cli = fakeCli(on, 3)
   on('command.register', (_, e) => ({ value: { command: e.name } }))

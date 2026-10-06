@@ -170,6 +170,11 @@ function answer(cli: Cli, argv: string[]): Out {
   // A pin is keyed by the id alone: the real binary takes no --archived for it.
   const anywhere = reachable([...cli.live, ...cli.archive]).find(r => r.id === first)
   const row = sub === 'restore' ? reachable(cli.archive).find(r => r.id === first) : sub === 'pin' || sub === 'unpin' ? anywhere : find(first)
+  // The current session is queued before Claude Code has written it.
+  if (row === undefined && sub === 'delete-when-empty' && current !== undefined && first === current) {
+    if (!cli.queued.includes(current)) cli.queued.push(current)
+    return { code: 0, out: { id: current, queued: true, changed: true } }
+  }
   if (row === undefined) return missing(first)
   if (sub === 'get') {
     return { code: 0, out: toCliDetail(row, { first_prompts: ['a'], last_prompts: ['b'], git_branch: null, model: null, version: null, path: '/x' }) }

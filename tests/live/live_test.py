@@ -375,9 +375,13 @@ def start(args: argparse.Namespace, name: str, fx: Fixture, width: int = 150, he
 
 
 def s_open_and_keys(run: Run) -> None:
-    s = run.screen
+    s, fx = run.screen, run.fx
     run.open()
     s.expect(r"Type to filter", "the hint teaches the filter at open")
+    # A fresh Claude Code that only ran /sessile: its session goes once left.
+    here = fx.current_id()
+    if here is None or fx.queued() != [here]:
+        raise Failure(f"the session that only opened the pane is not queued: {here}, {fx.queued()}")
     s.type("v")
     s.expect(r"Sessions ·", "v typed into the filter does not switch to the archive")
     s.expect(r"›\s*:?\s*v\b", "v lands in the filter")

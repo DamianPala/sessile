@@ -177,7 +177,18 @@ function answer(cli: Cli, argv: string[]): Out {
   }
   if (row === undefined) return missing(first)
   if (sub === 'get') {
-    return { code: 0, out: toCliDetail(row, { first_prompts: ['a'], last_prompts: ['b'], git_branch: null, model: null, version: null, path: '/x' }) }
+    const turns = (from: number, to: number) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => `prompt ${from + i} of ${row.title}`)
+    const n = row.prompts
+    const out = {
+      first_prompts: turns(1, Math.min(3, n)),
+      last_prompts: turns(Math.max(1, n - 2), n),
+      last_reply: n === 0 ? null : `the reply that ends ${row.title}, `.repeat(12),
+      git_branch: null,
+      model: null,
+      version: null,
+      path: '/x',
+    }
+    return { code: 0, out: toCliDetail(row, out) }
   }
   // Under --output-file the result goes to the file and stdout stays empty.
   if (sub === 'export') return { code: 0, out: undefined }

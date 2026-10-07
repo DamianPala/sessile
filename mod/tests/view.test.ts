@@ -30,6 +30,9 @@ import {
   settleTarget,
   shortPath,
   visibleRows,
+  detailPlan,
+  promptItems,
+  wrap,
 } from '../hooks/view'
 
 const row = (over: Partial<SessionRow>): SessionRow => ({
@@ -211,6 +214,45 @@ test('export file names: ASCII words, dashes, an id prefix, a fallback', () => {
   expect(exportFileName('x'.repeat(200), id)).toBe(`${'x'.repeat(60)}-0a1b2c3d.md`)
   expect(joinPath('/home/me/ai/', 'a.md')).toBe('/home/me/ai/a.md')
   expect(joinPath('~/exports', 'a.md')).toBe('~/exports/a.md')
+})
+
+test('promptItems: every prompt of a short session once, else 2 · more · 3, by turn', () => {
+  expect(promptItems(0, [], [])).toEqual([])
+  expect(promptItems(1, ['a'], ['a'])).toEqual([{ turn: 1, text: 'a' }])
+  // 5 prompts: the first and last three overlap on turn 3.
+  expect(promptItems(5, ['a', 'b', 'c'], ['c', 'd', 'e']).map(i => ('turn' in i ? i.turn : 0))).toEqual([1, 2, 3, 4, 5])
+  expect(promptItems(6, ['a', 'b', 'c'], ['d', 'e', 'f']).length).toBe(6)
+  expect(promptItems(37, ['a', 'b', 'c'], ['x', 'y', 'z'])).toEqual([
+    { turn: 1, text: 'a' },
+    { turn: 2, text: 'b' },
+    { more: 32 },
+    { turn: 35, text: 'x' },
+    { turn: 36, text: 'y' },
+    { turn: 37, text: 'z' },
+  ])
+})
+
+test('wrap fills lines by cells, cuts the last with …, splits a word wider than a line', () => {
+  expect(wrap('one two three four', 9, 3)).toEqual(['one two', 'three', 'four'])
+  expect(wrap('one two three four', 9, 2)).toEqual(['one two', 'three fo…'])
+  expect(wrap('日本語のテキスト', 6, 3)).toEqual(['日本語', 'のテキ', 'スト'])
+  expect(wrap('abcdefghij', 4, 2)).toEqual(['abcd', 'efg…'])
+  expect(wrap('a\u001b[31mb  c', 10, 1)).toEqual(['a [31mb c'])
+  expect(wrap('', 10, 2)).toEqual([])
+  expect(wrap('x', 10, 0)).toEqual([])
+  for (const line of wrap('🎉 wide emoji and CJK 漢字 '.repeat(8), 20, 4)) expect(cells(line)).toBeLessThanOrEqual(20)
+})
+
+test('detailPlan: height goes to the reply first, the keys always fit', () => {
+  // Chrome 7 + 2 key lines + prompts (5 × lines + 1) + reply heading 2 + reply.
+  expect(detailPlan(40, 2)).toEqual({ promptLines: 2, replyLines: 6 })
+  expect(detailPlan(28, 2)).toEqual({ promptLines: 2, replyLines: 6 })
+  expect(detailPlan(27, 2)).toEqual({ promptLines: 1, replyLines: 6 })
+  expect(detailPlan(21, 2)).toEqual({ promptLines: 1, replyLines: 4 })
+  expect(detailPlan(19, 2)).toEqual({ promptLines: 1, replyLines: 2 })
+  expect(detailPlan(18, 2)).toEqual({ promptLines: 1, replyLines: 0 })
+  // A narrow pane needs more key lines and gives up reply lines for them.
+  expect(detailPlan(28, 4).promptLines).toBe(1)
 })
 
 test('fromCli maps the snake_case row and reads the RFC 3339 time', () => {

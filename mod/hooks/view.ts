@@ -327,6 +327,7 @@ export function detailFromCli(raw: CliDetail): SessionDetail {
     ...fromCli(raw),
     firstPrompts: raw.first_prompts,
     lastPrompts: raw.last_prompts,
+    lastReply: raw.last_reply,
     gitBranch: raw.git_branch,
     model: raw.model,
     version: raw.version,
@@ -367,6 +368,7 @@ export function cleanDetail(d: SessionDetail): SessionDetail {
     ...cleanRow(d),
     firstPrompts: d.firstPrompts.map(clean),
     lastPrompts: d.lastPrompts.map(clean),
+    lastReply: d.lastReply === null ? null : clean(d.lastReply),
     gitBranch: d.gitBranch === null ? null : clean(d.gitBranch),
     model: d.model === null ? null : clean(d.model),
   }
@@ -385,6 +387,79 @@ export function fit(text: string, width: number): string {
     used += w
   }
   return total <= width ? out + ' '.repeat(width - used) : `${out}${' '.repeat(Math.max(0, limit - used))}…`
+}
+
+// Word wrap by terminal cells into at most `maxLines` lines; the last one
+// ends in … when text is left over. A word longer than a line is cut.
+export function wrap(text: string, width: number, maxLines: number): string[] {
+  if (maxLines < 1 || width < 2) return []
+  const lines: string[] = []
+  let line = ''
+  let used = 0
+  const push = () => {
+    lines.push(line)
+    line = ''
+    used = 0
+  }
+  for (const word of clean(text).split(' ')) {
+    const w = cells(word)
+    if (used > 0 && used + 1 + w <= width) {
+      line += ` ${word}`
+      used += 1 + w
+      continue
+    }
+    if (used > 0) push()
+    for (const ch of Array.from(word)) {
+      const c = cellWidth(ch)
+      if (used + c > width) push()
+      line += ch
+      used += c
+    }
+  }
+  if (used > 0) push()
+  if (lines.length <= maxLines) return lines
+  const kept = lines.slice(0, maxLines)
+  kept[maxLines - 1] = fit(`${kept[maxLines - 1]} ${lines[maxLines]}`, width).trimEnd()
+  return kept
+}
+
+// What the detail lists of the prompts, by turn (the numbers `sessile
+// export --turns` takes): every prompt of a short session, else the first two
+// for what it set out to do, a count of those left out, and the last three
+// for where it stopped.
+export type PromptItem = { turn: number; text: string } | { more: number }
+export const ALL_PROMPTS_UP_TO = 6
+
+export function promptItems(count: number, first: string[], last: string[]): PromptItem[] {
+  const tail = (list: string[]) => list.map((text, i) => ({ turn: count - list.length + i + 1, text }))
+  if (count <= ALL_PROMPTS_UP_TO) {
+    const byTurn = new Map<number, string>()
+    for (const { turn, text } of [...first.map((text, i) => ({ turn: i + 1, text })), ...tail(last)]) byTurn.set(turn, text)
+    return [...byTurn.entries()].sort(([a], [b]) => a - b).map(([turn, text]) => ({ turn, text }))
+  }
+  const head = first.slice(0, 2).map((text, i) => ({ turn: i + 1, text }))
+  const end = tail(last.slice(-3))
+  return [...head, { more: count - head.length - end.length }, ...end]
+}
+
+// Lines per prompt and for the last reply, from the body height alone and
+// sized for the longest list (five prompts and the "more" line), so the keys
+// at the foot never leave the pane and never move between sessions. Height
+// goes to the reply first: it says where the session stopped.
+export type DetailPlan = { promptLines: number; replyLines: number }
+const DETAIL_PLANS: DetailPlan[] = [
+  { promptLines: 2, replyLines: 6 },
+  { promptLines: 1, replyLines: 6 },
+  { promptLines: 1, replyLines: 4 },
+  { promptLines: 1, replyLines: 2 },
+]
+// Title, id line, updated line, the blank and PROMPTS heading above the
+// prompts; the live note and the notice below.
+const DETAIL_CHROME = 7
+
+export function detailPlan(bodyRows: number, buttonRows: number): DetailPlan {
+  const need = (p: DetailPlan) => DETAIL_CHROME + buttonRows + 5 * p.promptLines + 1 + 2 + p.replyLines
+  return DETAIL_PLANS.find(p => need(p) <= bodyRows) ?? { promptLines: 1, replyLines: 0 }
 }
 
 // `project` is the width of the project column, 0 when only one project is listed.

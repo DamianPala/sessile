@@ -513,6 +513,29 @@ test('d on this session leaves it for a fresh one, then deletes it', async ($, o
   await ui.unmount()
 })
 
+test('the detail lists prompts by turn and the last reply, as the height allows', async ($, on) => {
+  const cli = fakeCli(on, 20)
+  const long = cli.live.find(r => r.prompts === 12 && r.cwd === ROOT)!
+  for (const [columns, rows, hasReply] of [[120, 30, true], [56, 14, false]] as const) {
+    const ui = await mount($, columns, rows)
+    await ui.press({ key: 'k:g' })
+    await $.ui.focus({ component: 'Pane', requestId: 'sessile', element: `row:${long.id}`, origin: person })
+    await ui.press({ key: `row:${long.id}` })
+    expect(cli.view.mode.kind).toBe('detail')
+    // The first two, the 7 left out, the last three, numbered as export --turns.
+    expect(await ui.find({ type: 'Text', text: / 1 › prompt 1 of/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /┄┄ 7 more ┄┄/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /12 › prompt 12 of/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: / 3 › / })).toBeUndefined()
+    expect((await ui.find({ type: 'Text', text: /LAST REPLY/ })) !== undefined).toBe(hasReply)
+    // The keys stay at the foot however low the pane is.
+    expect(await ui.find({ key: 'k:back' })).toBeDefined()
+    expect(await ui.find({ key: 'k:q' })).toBeDefined()
+    await ui.press({ key: 'k:back' })
+    await ui.unmount()
+  }
+})
+
 test('d in the detail of this session, reached by clicks, deletes it the same way', async ($, on) => {
   const cli = fakeCli(on, 10)
   const ui = await mount($, 120, 24)

@@ -21,6 +21,7 @@ const ROWS = Array.from({ length: 40 }, (_, i) => row(i))
 const DETAIL = toCliDetail(ROWS[5]!, {
   first_prompts: ['first a', 'first b'],
   last_prompts: ['last a'],
+  last_reply: 'where it stopped',
   git_branch: 'main',
   model: 'claude-opus-5-5',
   version: '2.1.288',
@@ -82,7 +83,8 @@ test('the list, detail and confirm views draw valid trees on terminal and deskto
     // Enter on the ring row.
     await $.ui.focus({ component: 'Pane', requestId: 'sessile', element: `row:${ROWS[5]!.id}`, origin: { kind: 'person' } })
     await ui.press({ key: `row:${ROWS[5]!.id}` })
-    expect(await ui.find({ type: 'Text', text: /FIRST/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /PROMPTS/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /LAST REPLY/ })).toBeDefined()
     await ui.press({ key: 'k:d' })
     expect(await ui.find({ type: 'Text', text: /Delete permanently/ })).toBeDefined()
     await ui.press({ key: 'no' })

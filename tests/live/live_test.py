@@ -41,6 +41,8 @@ OTHER = "/work/other"
 EMPTY_FILTER = r"›\s*:\s*filter · Enter"
 # The first row of the default fixture is pinned.
 FIRST_ROW_PIN = "p [ unpin ]"
+# The detail's heading on a line of its own; the list's column header has the word too.
+DETAIL = r"(?m)^\s*PROMPTS\s*$"
 LEGEND = r"★ pinned\s+◆ this\s+● live\s+✎ named"
 NOW = time.time()
 
@@ -481,28 +483,32 @@ def s_detail(run: Run) -> None:
     s = run.screen
     run.open()
     s.keys("Down", "Enter")
-    s.wait(r"FIRST")
+    s.wait(DETAIL)
+    s.expect(r"PROMPTS\s+none\s+LAST REPLY\s+none", "an empty session says so in both")
     s.expect(r"esc \[ back \]", "detail offers esc back")
     for button in ("r [ resume ]", "t [ rename ]", FIRST_ROW_PIN, "i [ copy id ]", "q [ close ]"):
         s.expect(re.escape(button), "every detail button is drawn whole")
     s.keys("Escape")
-    s.wait_gone(r"FIRST")
+    s.wait_gone(DETAIL)
     s.wait(r"copy id")
     s.keys("Down")
     s.expect_prompt_empty("after Esc in the detail the arrows still move in the pane")
     s.expect(r"copy id", "the ring is on a row")
     s.keys("Enter")
-    s.wait(r"FIRST")
+    s.wait(DETAIL)
     s.keys("Enter")
-    s.wait_gone(r"FIRST")
+    s.wait_gone(DETAIL)
     s.keys("Enter")
-    s.wait(r"FIRST")
+    s.wait(DETAIL)
     s.keys("q")
-    s.wait_gone(r"FIRST|Sessions ·")
+    s.wait_gone(rf"{DETAIL}|Sessions ·")
     run.open()
     run.to_row("delta live one")
     s.keys("Enter")
     s.wait(r"Live session: resume, rename, archive and delete are")
+    s.expect(r" 1 › delta live one: first prompt", "prompts are numbered by turn")
+    s.expect(r" 3 › delta live one prompt 2", "every prompt of a short session, once")
+    s.expect(r"LAST REPLY\s+reply 2\b", "the last reply, where the session stopped")
 
 
 def s_changes(run: Run) -> None:
@@ -613,15 +619,15 @@ def s_mouse(run: Run) -> None:
     s = run.screen
     run.open()
     s.click("beta refactor plan")
-    s.expect_not(r"FIRST", "a first click selects, it does not open")
+    s.expect_not(DETAIL, "a first click selects, it does not open")
     s.expect(r"copy id", "the clicked row shows its actions")
     s.click("gamma zebracorn hunt")
-    s.expect_not(r"FIRST", "a click on another row selects it")
+    s.expect_not(DETAIL, "a click on another row selects it")
     s.click("gamma zebracorn hunt")
-    s.wait(r"FIRST")
+    s.wait(DETAIL)
     s.expect(r"gamma zebracorn hunt", "the second click opens the clicked row")
     s.keys("Escape")
-    s.wait_gone(r"FIRST")
+    s.wait_gone(DETAIL)
     # Escape's way back takes the keys back too; a click before it ends loses them to it.
     s.wait(r"copy id")
     time.sleep(1)
@@ -631,13 +637,13 @@ def s_mouse(run: Run) -> None:
         raise Failure(f"the click on the prompt did not give it the keys:\n{s.text()}")
     s.keys("BSpace")
     s.click("epsilon throwaway")
-    s.expect_not(r"FIRST", "the click that hands the pane its keys only selects")
+    s.expect_not(DETAIL, "the click that hands the pane its keys only selects")
     s.wait(r"copy id")
     s.keys("Down")
     s.expect_prompt_empty("after that click the keys are in the pane")
     s.click("alpha deploy notes")
     s.click("alpha deploy notes")
-    s.wait(r"FIRST")
+    s.wait(DETAIL)
 
 
 def real_session(prompt: str) -> str:

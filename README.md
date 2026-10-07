@@ -44,7 +44,7 @@ Update both together: the pane and the CLI of one version belong to each other.
 
 | Key | Does |
 |---|---|
-| `Enter` | details: id, directory, branch, first and last prompts |
+| `Enter` | details: id, directory, branch, the prompts by turn and the start of the last reply |
 | `r` | resume (switches this conversation; for another project it copies the command for a new terminal) |
 | `t` | rename |
 | `p` | pin to the top |

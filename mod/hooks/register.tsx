@@ -44,6 +44,9 @@ import {
   visibleRows,
   windowOffset,
   withoutListing,
+  detailPlan,
+  promptItems,
+  wrap,
 } from './view'
 
 const PANE = 'sessile'
@@ -1112,20 +1115,35 @@ function emptyReason(v: View): string {
   return v.isAllProjects ? 'No sessions in any project' : 'No sessions in this project'
 }
 
-// Pinned to the body height like the list, with fewer prompts in a low pane,
-// so the arrows walk the buttons instead of scrolling the pane.
+function promptLines(els: Els, d: SessionDetail, columns: number, perPrompt: number) {
+  const { Text } = els
+  const items = promptItems(d.prompts, d.firstPrompts, d.lastPrompts)
+  if (items.length === 0) return [<Text dimColor>{'   '}none</Text>]
+  const digits = String(d.prompts).length
+  const indent = ' '.repeat(digits + 4)
+  return items.flatMap(item => {
+    if ('more' in item) return [<Text dimColor>{indent}┄┄ {item.more} more ┄┄</Text>]
+    const turn = ` ${String(item.turn).padStart(digits)} › `
+    const lines = wrap(item.text, columns - indent.length, perPrompt)
+    return (lines.length === 0 ? [''] : lines).map((line, i) => (
+      <Text wrap="truncate-end"><Text dimColor>{i === 0 ? turn : indent}</Text>{line}</Text>
+    ))
+  })
+}
+
+function replyLines(els: Els, reply: string | null, columns: number, maxLines: number) {
+  const { Text } = els
+  if (reply === null) return [<Text dimColor>{'   '}none</Text>]
+  return wrap(reply, columns - 3, maxLines).map(line => <Text wrap="truncate-end">{'   '}{line}</Text>)
+}
+
+// Pinned to the body height like the list, the keys at its foot, so the
+// arrows walk the buttons instead of scrolling the pane; the height left
+// decides how many lines each prompt and the last reply get (detailPlan).
 function drawDetail($: EngineInterface, els: Els, v: View, d: SessionDetail, room: Room) {
   const { Box, Text } = els
   const m = marker(d, v.currentId)
-  const isWide = room.columns >= 90
-  const keep = room.bodyRows < 16 ? 2 : 3
   const style = { isArmed: room.isFocused }
-  const prompts = (title: string, list: string[]) => (
-    <Box flexDirection="column" flexGrow={1} width={isWide ? '50%' : '100%'}>
-      <Text dimColor bold>{title}</Text>
-      {list.length === 0 ? <Text dimColor>none</Text> : list.map(p => <Text wrap="truncate-end">› {p.replace(/\s+/g, ' ')}</Text>)}
-    </Box>
-  )
   const updated = new Date(d.updatedMs)
   const isHere = d.id === v.currentId
   const isLocked = d.isLive && !isHere
@@ -1136,6 +1154,8 @@ function drawDetail($: EngineInterface, els: Els, v: View, d: SessionDetail, roo
   // hears) and for a pane that could not take the keys back over a filled composer.
   const back = keyBtn(els, 'back', 'back', () => backTo($, { kind: 'detail', detail: d }), { ...style, isQuiet: true }, 'esc')
   const close = keyBtn(els, 'q', 'close', room.onClose, { ...style, isQuiet: true })
+  const buttons = [...actions, back, close]
+  const plan = detailPlan(room.bodyRows, packLines(buttons.map(b => b.width), room.columns).length)
   return (
     <Box flexDirection="column" height={room.bodyRows} overflow="hidden">
       <Box flexDirection="row" justifyContent="space-between">
@@ -1149,14 +1169,15 @@ function drawDetail($: EngineInterface, els: Els, v: View, d: SessionDetail, roo
         <Text dimColor>updated</Text> {updated.toISOString().slice(0, 16).replace('T', ' ')}   <Text dimColor>in</Text> {d.cwd === null ? '—' : shortPath(clean(d.cwd))}
       </Text>
       <Text> </Text>
-      <Box flexDirection={isWide ? 'row' : 'column'} gap={2}>
-        {prompts('FIRST', d.firstPrompts.slice(0, keep))}
-        {prompts('LAST', d.lastPrompts.slice(-keep))}
-      </Box>
-      <Text> </Text>
+      <Text dimColor bold>PROMPTS</Text>
+      {promptLines(els, d, room.columns, plan.promptLines)}
+      {plan.replyLines > 0 && <Text> </Text>}
+      {plan.replyLines > 0 && <Text dimColor bold>LAST REPLY</Text>}
+      {plan.replyLines > 0 && replyLines(els, d.lastReply, room.columns, plan.replyLines)}
+      <Box flexGrow={1} />
       {isLocked && <Text color="yellow">Live session: resume, rename, archive and delete are off.</Text>}
       {isHere && <Text dimColor wrap="truncate-end">This session: d deletes it and moves this window to a fresh one.</Text>}
-      {buttonLines(els, room.columns, [...actions, back, close])}
+      {buttonLines(els, room.columns, buttons)}
       {noticeLine($, els, v.notice, room.isFocused)}
     </Box>
   )

@@ -19,6 +19,8 @@ export type SessionRow = {
 export type SessionDetail = SessionRow & {
   firstPrompts: string[]
   lastPrompts: string[]
+  // The start of the last assistant message with text: where it stopped.
+  lastReply: string | null
   gitBranch: string | null
   model: string | null
   version: string | null
@@ -53,6 +55,7 @@ export type CliRow = {
 export type CliDetail = CliRow & {
   first_prompts: string[]
   last_prompts: string[]
+  last_reply: string | null
   git_branch: string | null
   model: string | null
   version: string | null

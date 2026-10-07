@@ -778,6 +778,12 @@ fn cmd_get(ctx: &ops::Ctx, id: &str, archived: bool, fmt: Format) -> Result<()> 
             .iter()
             .map(|p| format!("last:    {}", escape_controls(p))),
     );
+    out.extend(
+        detail
+            .last_reply
+            .as_deref()
+            .map(|r| format!("reply:   {}", escape_controls(r))),
+    );
     write_stdout(&(out.join("\n") + "\n"));
     after
 }

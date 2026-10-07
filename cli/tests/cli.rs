@@ -379,7 +379,11 @@ fn show_reports_prompts_and_metadata() {
     assert_eq!(v["git_branch"], "feat/x");
     assert_eq!(v["model"], "claude-x");
     assert_eq!(v["prompts"], 5);
+    // Claude Code's own `<synthetic>` note is not where the session left off.
+    assert_eq!(v["last_reply"], "a1");
     assert!(v["path"].as_str().unwrap().ends_with(&format!("{A}.jsonl")));
+    env.session(B, &[user("only asked")]);
+    assert_eq!(env.ok(&["get", B])["last_reply"], Value::Null);
 }
 
 #[cfg(unix)]

@@ -122,11 +122,12 @@ The `list` row plus:
 
 ```json
 {"first_prompts":["Fix the flaky login test"],"last_prompts":["Fix the flaky login test"],
+ "last_reply":"Fixed: the test waited for a timer the CI clock never fires…",
  "git_branch":"main","model":"claude-opus-5-5","version":"2.1.288",
  "path":"/home/me/.claude/projects/-work-proj/0a1b2c3d-1111-4222-8333-444455556666.jsonl"}
 ```
 
-Up to 3 first and 3 last prompts (they overlap in short sessions). `git_branch`, `model` (never `<synthetic>`) and `version` are the latest. Any of them can be `null`.
+Up to 3 first and 3 last prompts (they overlap in short sessions). `last_reply` is the start (600 characters, whitespace collapsed) of the last assistant message that has text, skipping Claude Code's own `<synthetic>` notes; `null` when there is none. `git_branch`, `model` (never `<synthetic>`) and `version` are the latest. Any of them can be `null`.
 
 ### `rename`
 

@@ -13,7 +13,8 @@ use crate::error::{Kind, Result, SessileError};
 use crate::output::rfc3339_ms;
 use crate::paths::{Located, project_dir, resume_command, validate_id};
 use crate::scan::{
-    Mapped, PromptStats, TITLE_KEEP, Titles, find_head, find_meta, scan_transcript, truncate_chars,
+    Mapped, PromptStats, REPLY_KEEP, TITLE_KEEP, Titles, find_head, find_meta, last_reply,
+    scan_transcript, truncate_chars,
 };
 
 #[derive(Serialize, Debug, Clone)]
@@ -55,6 +56,7 @@ pub struct Detail {
     pub row: Row,
     pub first_prompts: Vec<String>,
     pub last_prompts: Vec<String>,
+    pub last_reply: Option<String>,
     pub git_branch: Option<String>,
     pub model: Option<String>,
     pub version: Option<String>,
@@ -270,6 +272,7 @@ pub fn show(located: &Located, id: &str, live: &HashSet<String>) -> Result<Detai
         row,
         first_prompts: stats.first,
         last_prompts: stats.last.into_iter().collect(),
+        last_reply: last_reply(map.bytes(), REPLY_KEEP),
         git_branch: meta.git_branch,
         model: meta.model,
         version: meta.version,

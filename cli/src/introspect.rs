@@ -356,6 +356,12 @@ fn contract(name: &str) -> Contract {
                 "last_prompts".into(),
                 prompts("Up to 3 last prompts, 300 characters each"),
             );
+            detail.insert(
+                "last_reply".into(),
+                nullable_string(
+                    "The start of the last assistant message with text, up to 600 characters, whitespace collapsed; null when there is none",
+                ),
+            );
             detail.insert("git_branch".into(), nullable_string("Latest git branch"));
             detail.insert("model".into(), nullable_string("Latest model"));
             detail.insert(
@@ -367,6 +373,7 @@ fn contract(name: &str) -> Contract {
             required.extend([
                 "first_prompts",
                 "last_prompts",
+                "last_reply",
                 "git_branch",
                 "model",
                 "version",

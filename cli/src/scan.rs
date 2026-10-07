@@ -18,6 +18,8 @@ use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 pub const PROMPT_KEEP: usize = 300;
 /// Characters of the first prompt used as a fallback title.
 pub const TITLE_KEEP: usize = 80;
+/// The start of the last reply, about six lines of a wide pane.
+pub const REPLY_KEEP: usize = 600;
 const KEEP_PROMPTS: usize = 3;
 /// Lines read from the end of a transcript when looking for branch/model.
 const TAIL_LINES: usize = 3000;
@@ -448,6 +450,29 @@ pub fn for_each_assistant_text(data: &[u8], mut f: impl FnMut(&str)) {
     }
 }
 
+/// The text of the last assistant message that has any, read from the end:
+/// where the session left off. A reply that ends in tool calls has no text of
+/// its own, so the last one that does stands for it. Claude Code's own notes
+/// (model `<synthetic>`: an interrupt, an API error) are not replies.
+pub fn last_reply(data: &[u8], max: usize) -> Option<String> {
+    let needle = memmem::Finder::new(ASSISTANT_NEEDLE);
+    lines_rev(data)
+        .filter(|line| needle.find(line).is_some())
+        .find_map(|line| {
+            let entry = serde_json::from_slice::<Entry>(line).ok()?;
+            if entry.kind.as_str() != Some("assistant") || entry.is_synthetic() {
+                return None;
+            }
+            let message = entry.message.as_ref()?;
+            if message.model.as_str() == Some("<synthetic>") {
+                return None;
+            }
+            let text = message.content.as_ref()?.text()?;
+            let cleaned = clean(&text, max);
+            (!cleaned.is_empty()).then_some(cleaned)
+        })
+}
+
 /// Whether the transcript holds anything worth keeping besides counted
 /// prompts: an assistant message, or a user message with an attachment (an
 /// image, a file). A session started by a slash command, a screenshot or `!`
@@ -839,6 +864,33 @@ mod tests {
         let titles = find_titles(data.as_bytes());
         assert_eq!(titles.custom.as_deref(), Some("Mine v2"));
         assert_eq!(titles.ai.as_deref(), Some("Second"));
+    }
+
+    #[test]
+    fn last_reply_is_the_last_assistant_text_read_from_the_end() {
+        let reply = |content: &str| {
+            format!(
+                r#"{{"type":"assistant","message":{{"role":"assistant","content":{content}}}}}"#
+            )
+        };
+        let lines = [
+            user(r#""first""#),
+            reply(r#""an early answer""#),
+            user(r#""second""#),
+            reply(r#"[{"type":"text","text":"Done:\n\n- the   status is saved"}]"#),
+            // A reply that only calls a tool has no text of its own.
+            reply(r#"[{"type":"tool_use","name":"Bash","input":{}}]"#),
+            r#"{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":"a subagent"}}"#
+                .into(),
+            r#"{"type":"assistant","message":{"role":"assist"#.into(),
+        ];
+        let data = lines.join("\n");
+        assert_eq!(
+            last_reply(data.as_bytes(), 100).as_deref(),
+            Some("Done: - the status is saved")
+        );
+        assert_eq!(last_reply(data.as_bytes(), 4).as_deref(), Some("Done…"));
+        assert_eq!(last_reply(user(r#""only a prompt""#).as_bytes(), 100), None);
     }
 
     #[test]

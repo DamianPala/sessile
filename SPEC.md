@@ -115,6 +115,7 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 - Selected session: full id, branch, model, prompts, size, updated, cwd; then PROMPTS and LAST REPLY.
 - PROMPTS numbers each prompt by turn, as `export --turns` and `excerpts` do: every prompt of a session with up to 6, else the first 2 (what it set out to do), `┄┄ N more ┄┄`, the last 3 (where it stopped).
 - LAST REPLY is the start of the last assistant message with text (`get`'s `last_reply`): where the session left off, which a prompt alone does not say.
+  The pane drops `**` bold and `#` heading marks outside code spans, since the reply shows as one run of plain text; the CLI keeps the reply as written.
 - Lines per prompt and for the reply come from the body height alone, sized for the longest list, so the keys at the foot never move between sessions or leave the pane. Height goes to the reply first: 2 lines a prompt and 6 for the reply in a tall pane, then 1 and 6, 1 and 4, 1 and 2, and no reply in the lowest.
 
 ### Rename

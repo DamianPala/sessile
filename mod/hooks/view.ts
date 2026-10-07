@@ -302,6 +302,18 @@ export function clean(text: string): string {
   return stripControl(text).replace(/\s+/g, ' ').trim()
 }
 
+// Replies are Markdown; the preview is one run of plain text, where `**` and
+// `#` read as noise. Code spans are matched first so their content stays as is.
+const MARKUP = /(`[^`]*`)|\*\*(?=\S)(.+?)(?<=\S)\*\*|(^|\s)#{1,6}\s+/g
+
+export function plainMarkdown(text: string): string {
+  return text
+    .replace(MARKUP, (_all, code?: string, bold?: string, lead?: string) =>
+      code ?? bold ?? lead ?? '',
+    )
+    .trim()
+}
+
 export function fromCli(raw: CliRow): SessionRow {
   const row: SessionRow = {
     id: raw.id,
@@ -368,7 +380,7 @@ export function cleanDetail(d: SessionDetail): SessionDetail {
     ...cleanRow(d),
     firstPrompts: d.firstPrompts.map(clean),
     lastPrompts: d.lastPrompts.map(clean),
-    lastReply: d.lastReply === null ? null : clean(d.lastReply),
+    lastReply: d.lastReply === null ? null : plainMarkdown(clean(d.lastReply)),
     gitBranch: d.gitBranch === null ? null : clean(d.gitBranch),
     model: d.model === null ? null : clean(d.model),
   }

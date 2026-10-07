@@ -25,6 +25,7 @@ import {
   listPlan,
   marker,
   packLines,
+  plainMarkdown,
   projectName,
   rowLabel,
   settleTarget,
@@ -241,6 +242,20 @@ test('wrap fills lines by cells, cuts the last with …, splits a word wider tha
   expect(wrap('', 10, 2)).toEqual([])
   expect(wrap('x', 10, 0)).toEqual([])
   for (const line of wrap('🎉 wide emoji and CJK 漢字 '.repeat(8), 20, 4)) expect(cells(line)).toBeLessThanOrEqual(20)
+})
+
+test('plainMarkdown drops bold and heading marks, keeps code spans and prose', () => {
+  expect(plainMarkdown('**Tak, działa.** Federacja jest wyłączona')).toBe(
+    'Tak, działa. Federacja jest wyłączona',
+  )
+  expect(plainMarkdown('## Stan Wszystko **ok** i ### Dalej koniec')).toBe(
+    'Stan Wszystko ok i Dalej koniec',
+  )
+  expect(plainMarkdown('**użyj `x ** y` teraz** potem')).toBe('użyj `x ** y` teraz potem')
+  expect(plainMarkdown('kod `# nie nagłówek` i `**a**`')).toBe('kod `# nie nagłówek` i `**a**`')
+  expect(plainMarkdown('issue #12, C# i 2 ** 3 zostają')).toBe('issue #12, C# i 2 ** 3 zostają')
+  expect(plainMarkdown('ucięte **na końcu')).toBe('ucięte **na końcu')
+  expect(plainMarkdown('#')).toBe('#')
 })
 
 test('detailPlan: height goes to the reply first, the keys always fit', () => {

@@ -442,10 +442,28 @@ async function rename($: EngineInterface, row: SessionRow, title: string, from: 
   const next = clean(title)
   if (next === '' || next === row.title) return backTo($, from)
   const ran = await act($, 'Renaming', async () => {
+    if (row.id === (await $.session.id())) return renameHere($, row.id, next)
     await cli($, ['rename', row.id], { text: next })
     return { ...(await freshRows($)), mode: { kind: 'list' }, notice: done(`Renamed to “${next}”`) }
   })
   if (ran) await focusRow($, row.id)
+}
+
+// This window's own session is renamed by Claude Code's /rename: Claude Code
+// keeps writing the transcript and holds the title in memory, so a title the
+// CLI appended could be written over. The row is retitled here, since a reload
+// right away may read the transcript before Claude Code has written it.
+async function renameHere($: EngineInterface, id: string, title: string): Promise<Partial<View>> {
+  await $.command.run({ command: 'rename', args: title })
+  const retitle = (rows: SessionRow[]) =>
+    rows.map(r => (r.id === id ? { ...r, title, titleSource: 'custom' as const } : r))
+  const v = await readView($)
+  return {
+    rows: retitle(v.rows),
+    searchHits: v.searchHits === null ? null : retitle(v.searchHits),
+    mode: { kind: 'list' },
+    notice: done(`Renamed to “${title}”`),
+  }
 }
 
 // The session this window is in is planned with --leaving: the CLI lists its
@@ -1074,16 +1092,12 @@ function rowItems($: EngineInterface, els: Els, v: View, row: SessionRow, detail
     keyBtn(els, 'i', R.i[0], p => copyText($, row.id, 'session id', p.surface), style),
   ]
   const remove = keyBtn(els, 'd', R.d[0], () => askDelete($, row, detail), { ...style, isDanger: true })
+  const retitle = keyBtn(els, 't', R.t[0], () => startRename($, row, detail), style)
   // This window's own session: deleting it leaves it first (the dialog says so).
-  if (row.id === v.currentId) return [remove, pin, ...safe]
+  if (row.id === v.currentId) return [retitle, remove, pin, ...safe]
   if (row.isLive) return [textItem(els, LIVE_NOTE, 'yellow'), pin, ...safe]
   return [
-    ...(v.isArchiveView
-      ? []
-      : [
-          keyBtn(els, 'r', R.r[0], p => resumeRow($, row, p.surface), style),
-          keyBtn(els, 't', R.t[0], () => startRename($, row, detail), style),
-        ]),
+    ...(v.isArchiveView ? [] : [keyBtn(els, 'r', R.r[0], p => resumeRow($, row, p.surface), style), retitle]),
     keyBtn(els, 'a', R.a[v.isArchiveView ? 1 : 0], () => archiveOrRestore($, row, v.isArchiveView), style),
     remove,
     pin,
@@ -1176,7 +1190,7 @@ function drawDetail($: EngineInterface, els: Els, v: View, d: SessionDetail, roo
       {plan.replyLines > 0 && replyLines(els, d.lastReply, room.columns, plan.replyLines)}
       <Box flexGrow={1} />
       {isLocked && <Text color="yellow">Live session: resume, rename, archive and delete are off.</Text>}
-      {isHere && <Text dimColor wrap="truncate-end">This session: d deletes it and moves this window to a fresh one.</Text>}
+      {isHere && <Text dimColor wrap="truncate-end">This session: d deletes it and moves this window to a fresh one; t renames it as /rename does.</Text>}
       {buttonLines(els, room.columns, buttons)}
       {noticeLine($, els, v.notice, room.isFocused)}
     </Box>

@@ -57,7 +57,7 @@ A `Client` surface module gets keys only after a mouse click (`$.ui.focus` canno
 - A toggle that leaves no row keeps the ring on its own button, and an archive that leaves no row puts it on `u`, so the next letter acts instead of typing into the filter.
 - Changing the scope (`v`, `w`, `g`) runs an open full-text search again in the new scope.
 - All-projects view adds a PROJECT column (last segment of the session's cwd).
-- Detail and row actions: `r` resume, `t` rename, `a` archive/restore, `d` delete (on this window's own row: delete and leave), `p` pin/unpin, `m` export Markdown, `i` copy id; detail also `Esc` back (a clickable `esc back` button, no letter: `b` pages up in the list), `q` close.
+- Detail and row actions: `r` resume, `t` rename, `a` archive/restore, `d` delete (on this window's own row: delete and leave, and `t` runs `/rename`), `p` pin/unpin, `m` export Markdown, `i` copy id; detail also `Esc` back (a clickable `esc back` button, no letter: `b` pages up in the list), `q` close.
 - After archive or restore the notice offers `u` undo (the reverse command), until the next action.
 - Confirm dialogs: `y` yes, `n` cancel. `Esc` steps back one level: a filled filter clears first (wherever the ring is), the plain list closes the pane. The keys stay in the pane: Escape hands them to the prompt before the mod hears of it, so the pane asks for them back (granted over an empty composer).
 - The ✕ mark and `ctrl+x x` reach the mod as the same close as Escape, so with a filter or a detail open they step back too.
@@ -121,6 +121,7 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 ### Rename
 
 - Appends `{"type":"custom-title","customTitle":"<name>","sessionId":"<id>"}` to the jsonl, the same entry `/rename` writes.
+- This window's own session is renamed by running `/rename <name>` in it: Claude Code keeps writing that transcript and holds the title in memory, so only it can change the title. The row takes the new title at once; a reload right away could read the file before Claude Code has written it.
 
 ### Archive / restore
 
@@ -173,7 +174,7 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 
 ### Guards
 
-- Any live session: no delete, archive or rename (rename appends to a file another process writes). The current session: no archive or rename, and delete only by leaving it first (above).
+- Any live session: no delete, archive or rename (rename appends to a file another process writes). The current session: no archive, rename only through `/rename` (above), and delete only by leaving it first (above).
 - Every destructive action re-checks the guard right before running, not only when the list was drawn.
 - Every action ends with a toast stating what happened, or the error with the path.
 

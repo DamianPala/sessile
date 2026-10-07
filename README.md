@@ -56,7 +56,7 @@ Update both together: the pane and the CLI of one version belong to each other.
 Below the list: `v` archive view, `w` all projects, `x` junk only (at most one prompt, under 20 KB, or untitled), `e` delete empty sessions, `g` reload, `q` close. `Esc` steps back one level.
 
 Sessions another Claude Code is running cannot be renamed, archived or deleted.
-The session you are in can only be deleted: `d` on its `◆` row first moves this window to a fresh session, as `/clear` does, then deletes the old one. If you leave that fresh session without typing anything, sessile removes it too (within a minute while Claude Code runs, otherwise when it next starts), so it does not pile up in `/resume`.
+The session you are in can be renamed and deleted: `t` on its `◆` row runs `/rename` for you, and `d` first moves this window to a fresh session, as `/clear` does, then deletes the old one. If you leave that fresh session without typing anything, sessile removes it too (within a minute while Claude Code runs, otherwise when it next starts), so it does not pile up in `/resume`.
 The same goes for a session you started only to open `/sessile`: once you leave it without typing anything, it is removed.
 
 ## The CLI

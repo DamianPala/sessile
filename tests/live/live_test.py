@@ -708,10 +708,10 @@ def s_guards(run: Run) -> None:
         raise Failure(f"the refusal is not an error object of kind session_live: {out.stderr!r}")
 
 
-def s_leave(run: Run) -> None:
-    """d on this window's own session: /clear in the real Claude Code, then the
-    delete of its fixture copy, and the fresh session queued."""
-    s, fx = run.screen, run.fx
+def this_window(run: Run, title: str) -> Session:
+    """A fixture copy of the session this Claude Code window is in, so the
+    pane lists it as its ◆ row."""
+    fx = run.fx
     # The sweep at start is the first call, and it carries this window's id.
     deadline = time.time() + 10
     while not any(" sweep" in line for line in fx.call_lines()):
@@ -721,9 +721,54 @@ def s_leave(run: Run) -> None:
     here = fx.current_id()
     if here is None:
         raise Failure(f"the sweep at start carried no --current: {fx.call_lines()}")
-    mine = Session("leave me now", id=here)
+    mine = Session(title, id=here)
     fx.sessions.append(mine)
     fx.transcript(mine).write_text("\n".join(session_lines(mine)) + "\n")
+    return mine
+
+
+def real_transcript(id: str) -> Path:
+    return Path.home() / ".claude" / "projects" / slug(str(CWD)) / f"{id}.jsonl"
+
+
+def s_rename_here(run: Run) -> None:
+    """t on this window's own session: the real Claude Code's /rename writes the
+    title; the CLI does not touch the transcript."""
+    s, fx = run.screen, run.fx
+    mine = this_window(run, "rename me here")
+    before = fx.transcript(mine).read_bytes()
+    run.open()
+    run.to_row(mine.title)
+    s.keys("t")
+    s.wait(r"Rename session")
+    s.repeat("BSpace", 40)
+    s.type("renamed here")
+    s.keys("Enter")
+    s.wait(r"Renamed to “renamed here”")
+    # The filter that found the row holds the old title.
+    run.clear_filter()
+    s.wait(r"◆.*renamed here", timeout=5)
+    if any(" rename " in line for line in fx.call_lines()):
+        raise Failure(f"the CLI was asked to rename this session: {fx.call_lines()}")
+    if fx.transcript(mine).read_bytes() != before:
+        raise Failure("the fixture transcript changed: the title went through the CLI")
+    # /rename writes under the real config, which Claude Code runs on.
+    real = real_transcript(mine.id)
+    deadline = time.time() + 10
+    while not (real.exists() and '"customTitle":"renamed here"' in real.read_text()):
+        if time.time() > deadline:
+            raise Failure(f"no custom-title from /rename in {real}")
+        time.sleep(0.2)
+    s.keys("Down")
+    s.expect_prompt_empty("after a rename, the keys stay in the pane")
+
+
+def s_leave(run: Run) -> None:
+    """d on this window's own session: /clear in the real Claude Code, then the
+    delete of its fixture copy, and the fresh session queued."""
+    s, fx = run.screen, run.fx
+    mine = this_window(run, "leave me now")
+    here = mine.id
     env = fx.config / "session-env" / here
     env.mkdir(parents=True)
     (env / "env").write_text("x")
@@ -731,7 +776,8 @@ def s_leave(run: Run) -> None:
     run.open()
     run.to_row(mine.title)
     s.expect(r"d \[ delete \]", "this window's own session offers delete")
-    s.expect_not(r"t \[ rename|r \[ resume|a \[ archive", "but no rename, resume or archive")
+    s.expect(r"t \[ rename", "and rename")
+    s.expect_not(r"r \[ resume|a \[ archive", "but no resume or archive")
     s.keys("d")
     s.wait(r"Delete this session and leave it\?")
     s.expect(r"first moves to a fresh session", "the dialog says the window moves")
@@ -750,7 +796,7 @@ def s_leave(run: Run) -> None:
         raise Failure(f"the fresh session {fresh} is not the one queued: {fx.queued()}")
     # Claude Code writes the /clear stub under the real config; the pane reads
     # the fixture, so it sees the stub only through a copy (read, never moved).
-    stub = Path.home() / ".claude" / "projects" / slug(str(CWD)) / f"{fresh}.jsonl"
+    stub = real_transcript(fresh)
     deadline = time.time() + 10
     while not stub.exists():
         if time.time() > deadline:
@@ -777,6 +823,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "mouse": s_mouse,
     "resume": s_resume,
     "guards": s_guards,
+    "rename_here": s_rename_here,
     "leave": s_leave,
 }
 # Fixture size and layout per scenario, where not the default.

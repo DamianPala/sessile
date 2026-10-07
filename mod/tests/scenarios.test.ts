@@ -479,8 +479,8 @@ test('d on this session leaves it for a fresh one, then deletes it', async ($, o
   const ui = await mount($, 120, 24)
   await ui.press({ key: 'k:g' })
   await onThisRow($)
-  // Its own row offers delete, but no resume, rename or archive.
-  for (const key of ['k:r', 'k:t', 'k:a']) expect(await ui.find({ key })).toBeUndefined()
+  // Its own row offers delete and rename, but no resume or archive.
+  for (const key of ['k:r', 'k:a']) expect(await ui.find({ key })).toBeUndefined()
   await ui.press({ key: 'k:d' })
   expect(cli.calls.at(-1)).toContain('--leaving')
   expect(await ui.find({ type: 'Text', text: /Delete this session and leave it\?/ })).toBeDefined()
@@ -510,6 +510,26 @@ test('d on this session leaves it for a fresh one, then deletes it', async ($, o
   expect(await ui.find({ key: `row:${fresh}` })).toBeUndefined()
   // The ring takes the row that took its place, never the filter.
   expect(cli.view.focusKey).toBe(rowKey(1))
+  await ui.unmount()
+})
+
+test('t on this session renames it through /rename, not the CLI', async ($, on) => {
+  const cli = fakeCli(on, 10)
+  const renamed: string[] = []
+  on('command.run', { command: 'rename' }, (_, e) => {
+    renamed.push(e.args)
+    return { text: '' }
+  })
+  const ui = await mount($, 120, 24)
+  await ui.press({ key: 'k:g' })
+  await onThisRow($)
+  await ui.press({ key: 'k:t' })
+  await $.ui.input({ plugin: 'sessile', key: 'rename', text: 'here \u001b[2J now' })
+  expect(renamed).toEqual(['here [2J now'])
+  expect(cli.calls.some(a => subcommand(a) === 'rename')).toBe(false)
+  expect(cli.view.rows.find(r => r.id === CURRENT)?.title).toBe('here [2J now')
+  expect(cli.view.notice).toEqual({ kind: 'ok', text: 'Renamed to “here [2J now”' })
+  expect(cli.view.focusKey).toBe(rowKey(0))
   await ui.unmount()
 })
 

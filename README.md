@@ -55,6 +55,12 @@ Update both together: the pane and the CLI of one version belong to each other.
 
 Below the list: `v` archive view, `w` all projects, `x` junk only (at most one prompt, under 20 KB, or untitled), `e` delete empty sessions, `g` reload, `q` close. `Esc` steps back one level.
 
+`Tab` and `Shift+Tab` move from row to row and button to button. Claude Code binds no `←`/`→` in a pane, so `←` falls through to its "← opens agents" gesture and switches to the agents view. To walk the buttons with the arrows instead, put this in `~/.claude/keybindings.json` (or add the entry to its `bindings` list); it applies to every plugin pane:
+
+```json
+{"bindings":[{"context":"Pane","bindings":{"left":"abovePrompt:previous","right":"abovePrompt:next"}}]}
+```
+
 Sessions another Claude Code is running cannot be renamed, archived or deleted.
 The session you are in can be renamed and deleted: `t` on its `◆` row runs `/rename` for you, and `d` first moves this window to a fresh session, as `/clear` does, then deletes the old one. If you leave that fresh session without typing anything, sessile removes it too (within a minute while Claude Code runs, otherwise when it next starts), so it does not pile up in `/resume`.
 The same goes for a session you started only to open `/sessile`: once you leave it without typing anything, it is removed.

@@ -58,6 +58,9 @@ export type Cli = {
   isClearStuck: boolean
   // Runs when the mod sleeps, before the sleep passes at once.
   onSleep: (() => void) | null
+  // Panes the mod closed and toasts it showed, in order.
+  closed: string[]
+  toasts: string[]
   // The mod's view as last written: the test's window into its state.
   view: View
 }
@@ -253,6 +256,8 @@ export function fakeCli(on: On, rowCount = 40, otherCount = 5): Cli {
     sweeps: 0,
     isClearStuck: false,
     onSleep: null,
+    closed: [],
+    toasts: [],
     view: emptyView,
   }
   // /clear as Claude Code runs it: the window moves to a fresh, empty
@@ -282,7 +287,14 @@ export function fakeCli(on: On, rowCount = 40, otherCount = 5): Cli {
   })
   on('ui.focus', () => ({}))
   on('ui.scroll', () => ({}))
-  on('ui.close', () => ({ value: undefined }))
+  on('ui.close', (_, e) => {
+    cli.closed.push(e.id)
+    return { value: undefined }
+  })
+  on('ui.toast', (_, e) => {
+    cli.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('ui.copy', () => ({ value: { isCopied: true } }))
   on('session.root', () => ({ value: ROOT }))
   on('session.id', () => ({ value: cli.current }))

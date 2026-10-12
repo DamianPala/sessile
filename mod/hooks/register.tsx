@@ -400,7 +400,8 @@ async function openRow($: EngineInterface, row: SessionRow) {
 // for another one it says "not found" and resolves all the same, so such a
 // session gets the command for a terminal of its own instead. A session that
 // went live since the list was drawn is refused: two processes would append
-// to one transcript.
+// to one transcript. Once in, the pane closes: the person came for that
+// conversation, not for the list.
 async function resumeRow($: EngineInterface, row: SessionRow, surface: Surface) {
   if (await isStale($, row)) return
   const v = await readView($)
@@ -413,14 +414,17 @@ async function resumeRow($: EngineInterface, row: SessionRow, surface: Surface) 
     // /resume reports a miss as text, not as an error: the session this
     // window is in afterwards tells whether it switched.
     if ((await $.session.id()) !== row.id) throw new Error(clean(answer.text ?? '') || 'Claude Code stayed in this session')
-    return {
-      ...(await freshRows($)),
-      currentId: await $.session.id(),
-      mode: { kind: 'list' },
-      notice: done(`Resumed “${row.title || row.id.slice(0, 8)}”`),
-    }
+    return { ...(await freshRows($)), currentId: await $.session.id(), mode: { kind: 'list' }, notice: null }
   })
-  if (ran) await focusRow($, row.id)
+  if (!ran) return
+  await closeView($)
+  // After the close: an open pane holds the toasts back.
+  $.ui.toast(`Resumed “${row.title || row.id.slice(0, 8)}”`)
+}
+
+async function closeView($: EngineInterface) {
+  if (layout === 'band') await patch($, { isBandOpen: false })
+  else await $.ui.close({ id: PANE })
 }
 
 // The command is drawn even where the clipboard is out of reach (a narrow

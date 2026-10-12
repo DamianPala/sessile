@@ -670,12 +670,12 @@ def s_resume(run: Run) -> None:
     s.keys("r")
     s.wait(r"Resumed “resume target”", timeout=30)
     s.wait(r"Reply with the single word: kilo", where="all")
+    s.wait_gone(r"Sessions · \d+")
     # The resumed session is now this one: no resume, only delete-and-leave.
-    # The ring moves to the row only after the notice is drawn.
-    s.wait(r"d \[ delete \]  p \[", timeout=5)
+    run.open()
+    run.to_row(target.title)
+    s.expect(r"d \[ delete \]  p \[", "this window's own row offers delete")
     s.expect_not(r"r \[ resume", "this window's own session is not resumed again")
-    s.keys("Down")
-    s.expect_prompt_empty("after a resume the keys stay in the pane")
 
     s.keys("w")
     s.wait(r"all projects ·")

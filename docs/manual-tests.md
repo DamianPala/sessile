@@ -16,7 +16,7 @@ Rules:
 4. **Clean up.** Find the junk sessions and archive a few of them.
 5. **Undo a mistake.** Archive one session too many and get it back right away.
 6. **Get a session back from the archive** that you archived earlier.
-7. **Resume an old session**, first one of this project, then one of another project in a new terminal tab (paste what the pane gives you). Did you expect the first one to switch this very conversation?
+7. **Resume an old session**, first one of this project, then one of another project in a new terminal tab (paste what the pane gives you). Did you expect the first one to switch this very conversation and close the pane?
 8. **Hand an old session to the current Claude as a file** and ask it something about that session.
 9. **Find a session from another project.**
 10. **Delete the empty sessions** of this project.

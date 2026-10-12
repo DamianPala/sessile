@@ -164,7 +164,7 @@ Never touched: `projects/<proj>/memory/`, agent memory, anything not keyed by th
 
 ### Resume
 
-- `r` on a session of this project switches the running Claude Code to it in place (`$.command.run` of `/resume <id>`); the pane stays open on the list, the resumed session now marked `◆`.
+- `r` on a session of this project switches the running Claude Code to it in place (`$.command.run` of `/resume <id>`); then the pane (or the band) closes and a toast says "Resumed …": the person came for that conversation. A failed resume keeps the pane open with the error.
 - `/resume <id>` reaches only the current project's sessions (for another it prints "not found" and resolves anyway), so `r` on another project's session copies `cd '<cwd>' && claude --resume <id>` and draws it in the notice, for a new terminal.
 - Not offered on live sessions (the current one included) or in the archive; a session that went live after the list was drawn is refused at the press, since two processes would append to one transcript.
 

@@ -210,10 +210,11 @@ test('r says so when /resume did not move into the session', async ($, on) => {
   expect(cli.view.notice?.kind).toBe('error')
   expect(cli.view.notice?.text).toMatch(/^Resuming failed: Session .* was not found/)
   expect(cli.view.currentId).not.toBe(id)
+  expect(cli.closed).toEqual([])
   await ui.unmount()
 })
 
-test('r resumes a session of this project in place and keeps the pane on it', async ($, on) => {
+test('r resumes a session of this project in place and closes the pane', async ($, on) => {
   const cli = fakeCli(on, 10)
   const resumed = stubResume(on, cli)
   const ui = await mount($, 120, 24)
@@ -221,8 +222,10 @@ test('r resumes a session of this project in place and keeps the pane on it', as
   await $.ui.focus({ component: 'Pane', requestId: 'sessile', element: rowKey(5), origin: person })
   await ui.press({ key: 'k:r' })
   expect(resumed).toEqual([rowKey(5).slice(4)])
-  expect(cli.view.notice?.text).toMatch(/^Resumed/)
-  expect(cli.view.focusKey).toBe(rowKey(5))
+  expect(cli.closed).toEqual(['sessile'])
+  expect(cli.toasts).toEqual([expect.stringMatching(/^Resumed “/)])
+  expect(cli.view.notice).toBeNull()
+  expect(cli.view.currentId).toBe(rowKey(5).slice(4))
   // Live rows (the current one among them) and archived ones offer no resume.
   await $.ui.focus({ component: 'Pane', requestId: 'sessile', element: rowKey(1), origin: person })
   expect(await ui.find({ key: 'k:r' })).toBeUndefined()
@@ -238,6 +241,7 @@ test('r on another project copies its command instead, since /resume cannot reac
   await ui.press({ key: 'k:r' })
   expect(resumed).toEqual([])
   expect(cli.view.notice?.text).toContain(`cd '${OTHER}' && claude --resume ${rowKey(OTHER_FROM).slice(4)}`)
+  expect(cli.closed).toEqual([])
   // A row of this project in the same all-projects view still resumes.
   await $.ui.focus({ component: 'Pane', requestId: 'sessile', element: rowKey(5), origin: person })
   await ui.press({ key: 'k:r' })
@@ -255,6 +259,7 @@ test('r refuses a session that went live after the list was drawn', async ($, on
   await ui.press({ key: 'k:r' })
   expect(resumed).toEqual([])
   expect(cli.view.notice?.text).toMatch(/live in another terminal/)
+  expect(cli.closed).toEqual([])
   await ui.unmount()
 })
 
